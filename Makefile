@@ -1,6 +1,7 @@
 # Makefile - local dev helpers that mirror the CI steps.
 # Usage:
 #   make            lint + test (default)
+#   make test-integration   X11 tests on throwaway displays (Xvfb, xfwm4)
 #   make build      build ./prezilla
 #   make install    install under $(DESTDIR)$(PREFIX) (no root needed with DESTDIR)
 #   make package    build .deb/.rpm/.pkg.tar.zst into dist/ (requires nfpm)
@@ -19,7 +20,7 @@ DESTDIR ?=
 ICONS   := packaging/icons/hicolor
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build test lint run icons install uninstall package ci clean
+.PHONY: all build test test-integration lint run icons install uninstall package ci clean
 
 all: lint test
 
@@ -27,7 +28,11 @@ build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o prezilla ./cmd/prezilla
 
 test:
-	go test ./...
+	go test -race -count=1 ./...
+
+# X11 integration tests on throwaway displays (needs Xvfb, xfwm4, dbus-run-session).
+test-integration:
+	bash scripts/integration.sh
 
 lint:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi

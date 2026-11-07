@@ -16,8 +16,29 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Lint and test
-        run: make ci
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
 
       - name: Build
         run: make build
+
+  integration:
+    name: X11 integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install X server and window manager
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xfwm4 x11-utils dbus-x11
+
+      - name: Integration tests
+        run: make test-integration
