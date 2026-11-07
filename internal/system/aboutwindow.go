@@ -20,36 +20,22 @@ type AboutWindow interface {
 // callers fall back to the About notification.
 var ErrNoZenity = errors.New("about: zenity not found")
 
-// WebsiteError reports that the user chose "Open website" but the opener
-// failed. The window itself worked, so callers show the error instead of
-// falling back to the notification. The message names the URL, so the user
-// can still copy the address when no opener works.
-type WebsiteError struct {
-	URL string
-	Err error
-}
-
-func (e *WebsiteError) Error() string {
-	return "about: could not open " + e.URL + ": " + e.Err.Error()
-}
-func (e *WebsiteError) Unwrap() error { return e.Err }
-
-// ZenityAbout shows the About window with zenity (an optional runtime tool).
-// The window blocks until the user answers, so Runner needs a long timeout;
-// cancelling ctx closes it.
+// ZenityAbout shows the About window with zenity (an optional runtime tool):
+// the text with the project link and one Close button. Clicking the link is
+// left to the toolkit's own link handling (the default browser). The window
+// blocks until it is closed, so Runner needs a long timeout; cancelling ctx
+// closes it.
 type ZenityAbout struct {
 	Runner Runner
-	Opener Opener
 }
 
-// zenity --question exit codes that mean "closed, nothing to do": Cancel
-// (the Close button), --timeout, and the title-bar X or Esc.
+// zenity --info exit codes besides 0 (Close) that mean "closed, nothing to
+// do": 1 (cancel), 5 (--timeout) and 255 (title-bar X or Esc).
 var zenityClosed = map[int]bool{1: true, 5: true, 255: true}
 
-// Show implements AboutWindow. It returns nil when the window was closed or
-// the website opened; ErrNoZenity when zenity is missing; a *WebsiteError
-// when the opener failed; ctx's error when ctx ended; any other error is a
-// real zenity failure.
+// Show implements AboutWindow. It returns nil once the window was closed;
+// ErrNoZenity when zenity is missing; ctx's error when ctx ended; any other
+// error is a real zenity failure.
 func (z ZenityAbout) Show(ctx context.Context, info about.Info) error {
 	if z.Runner == nil {
 		return fmt.Errorf("%w: no runner configured", ErrNoZenity)
@@ -78,12 +64,6 @@ func (z ZenityAbout) Show(ctx context.Context, info about.Info) error {
 		}
 		return fmt.Errorf("about: %w", err)
 	}
-	if z.Opener == nil {
-		return &WebsiteError{URL: info.Website, Err: errors.New("no opener configured")}
-	}
-	if err := z.Opener.Open(ctx, info.Website); err != nil {
-		return &WebsiteError{URL: info.Website, Err: err}
-	}
 	return nil
 }
 
@@ -109,8 +89,8 @@ func zenityArgs(major int, info about.Info) []string {
 	if major == 3 {
 		icon = "--icon-name=" + info.IconName
 	}
-	return []string{"--question", "--title=About " + info.Name, "--width=380",
-		"--ok-label=Open website", "--cancel-label=Close", "--modal", icon,
+	return []string{"--info", "--title=About " + info.Name, "--width=380",
+		"--ok-label=Close", "--modal", icon,
 		"--text=" + aboutMarkup(info)}
 }
 
@@ -126,7 +106,8 @@ var markupEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", 
 func escapeMarkup(s string) string { return markupEscaper.Replace(s) }
 
 // aboutMarkup renders the window text. Every value is escaped; the website
-// becomes a link only for http(s) URLs, otherwise its label is plain text.
+// becomes the clickable project link only for http(s) URLs, otherwise its
+// label is plain text, so an About value can never inject a link scheme.
 func aboutMarkup(info about.Info) string {
 	label := info.WebsiteLabel
 	if label == "" {

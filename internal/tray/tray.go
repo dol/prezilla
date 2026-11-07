@@ -256,8 +256,8 @@ type Config struct {
 	Spawn    func() error
 	About    about.Info
 	Notifier system.Notifier
-	// AboutWindow shows About prezilla (with its Open website button); nil
-	// or a failure falls back to the About notification.
+	// AboutWindow shows About prezilla (with the clickable project link);
+	// nil or a failure falls back to the About notification.
 	AboutWindow system.AboutWindow
 	// ScreenSaver reports screensaver activation; nil disables the
 	// "continue presenting?" prompt entirely.
@@ -303,20 +303,16 @@ func (s *aboutShower) logf(format string, args ...any) {
 }
 
 // show opens the window and waits for it. A cancelled ctx (Quit) returns
-// nil without a notification; an opener failure after "Open website" is
-// returned as is; a missing zenity or another window failure falls back to
-// the notification, whose error is returned if it fails too.
+// nil without a notification; a missing zenity or another window failure
+// falls back to the notification, whose error is returned if it fails too.
 func (s *aboutShower) show(ctx context.Context) error {
 	if s.window != nil {
 		err := s.window.Show(ctx, s.info)
-		var we *system.WebsiteError
 		switch {
 		case err == nil:
 			return nil
 		case ctx.Err() != nil:
 			return nil
-		case errors.As(err, &we):
-			return err
 		case errors.Is(err, system.ErrNoZenity):
 			s.warnOnce.Do(func() { s.logf("about: zenity not found; showing a notification instead") })
 		default:

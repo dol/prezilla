@@ -65,14 +65,11 @@ func run(ctx context.Context) int {
 	d.Engine.SetRestorers(all)
 	d.DefaultTimeout = cfg.Timeout()
 	d.Tray = func(ctx context.Context) error {
-		// The About window waits for the user, so its runner gets a long
-		// timeout; Quit still closes it through ctx. zenity 4 reads
+		// The About window waits until it is closed, so its runner gets a
+		// long timeout; Quit still closes it through ctx. zenity 4 reads
 		// --icon=prezilla as a file path first, so run it from "/" where no
 		// such file can shadow the icon name.
-		aboutWindow := system.ZenityAbout{
-			Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"},
-			Opener: system.ExecOpener{Runner: system.ExecRunner{}},
-		}
+		aboutWindow := system.ZenityAbout{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}}
 		return tray.Run(ctx, tray.Config{
 			Engine: d.Engine, Timeout: cfg.Timeout(), Spawn: spawnWatcher,
 			About:       about.New(version),

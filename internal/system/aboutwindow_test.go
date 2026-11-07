@@ -21,25 +21,27 @@ const wantMarkup = "<b>prezilla</b> 1.2.3\nPresentation mode switcher\n\nLicense
 	`<a href="https://github.com/dol/prezilla">github.com/dol/prezilla</a>`
 
 func zenityKey(iconFlag, markup string) string {
-	return strings.Join([]string{"zenity", "--question", "--title=About prezilla", "--width=380",
-		"--ok-label=Open website", "--cancel-label=Close", "--modal", iconFlag, "--text=" + markup}, " ")
+	return strings.Join([]string{"zenity", "--info", "--title=About prezilla", "--width=380",
+		"--ok-label=Close", "--modal", iconFlag, "--text=" + markup}, " ")
 }
 
-// newZenity returns a ZenityAbout over fakes; version is zenity's --version output.
-func newZenity(version string) (ZenityAbout, *FakeRunner, *FakeOpener) {
+// newZenity returns a ZenityAbout over a FakeRunner; version is zenity's --version output.
+func newZenity(version string) (ZenityAbout, *FakeRunner) {
 	r := &FakeRunner{Out: map[string]string{"zenity --version": version}, Err: map[string]error{}}
-	o := &FakeOpener{}
-	return ZenityAbout{Runner: r, Opener: o}, r, o
+	return ZenityAbout{Runner: r}, r
 }
 
 func TestZenityAboutExactArgv(t *testing.T) {
-	z, r, _ := newZenity("4.2.1")
+	z, r := newZenity("4.2.1")
 	if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"zenity --version", zenityKey("--icon=prezilla", wantMarkup)}
 	if strings.Join(r.Calls, "\n---\n") != strings.Join(want, "\n---\n") {
 		t.Errorf("calls\n%q\nwant\n%q", r.Calls, want)
+	}
+	if strings.Contains(r.Calls[1], "--cancel-label") || strings.Contains(r.Calls[1], "--question") {
+		t.Errorf("window must have only a Close button: %q", r.Calls[1])
 	}
 }
 
@@ -52,7 +54,7 @@ func TestZenityAboutIconFlagByMajorVersion(t *testing.T) {
 		"":        "--icon=prezilla",
 	}
 	for ver, flag := range cases {
-		z, r, _ := newZenity(ver)
+		z, r := newZenity(ver)
 		if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
 			t.Fatalf("%q: %v", ver, err)
 		}
@@ -62,85 +64,47 @@ func TestZenityAboutIconFlagByMajorVersion(t *testing.T) {
 	}
 }
 
-func TestZenityAboutOpenWebsiteOpensOnce(t *testing.T) {
-	z, _, o := newZenity("4.2.1")
-	if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
-		t.Fatal(err)
-	}
-	if len(o.Calls) != 1 || o.Calls[0] != about.Website {
-		t.Errorf("opener calls %q", o.Calls)
-	}
-}
-
-func TestZenityAboutClosedExitsOpenNothing(t *testing.T) {
+func TestZenityAboutClosedExitsAreNil(t *testing.T) {
 	for _, code := range []int{1, 5, 255} {
-		z, r, o := newZenity("4.2.1")
+		z, r := newZenity("4.2.1")
 		r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w", exitErr(code))
 		if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
 			t.Errorf("exit %d: %v", code, err)
-		}
-		if len(o.Calls) != 0 {
-			t.Errorf("exit %d opened %q", code, o.Calls)
 		}
 	}
 }
 
 func TestZenityAboutRealFailureIsError(t *testing.T) {
 	for _, cause := range []error{exitErr(2), exitErr(-1), errors.New("start failed")} {
-		z, r, o := newZenity("4.2.1")
+		z, r := newZenity("4.2.1")
 		r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w", cause)
 		err := z.Show(context.Background(), about.New("1.2.3"))
 		if err == nil || errors.Is(err, ErrNoZenity) {
 			t.Errorf("%v: got %v, want a non-ErrNoZenity error", cause, err)
 		}
-		var we *WebsiteError
-		if errors.As(err, &we) {
-			t.Errorf("%v: must not be a WebsiteError", cause)
-		}
-		if len(o.Calls) != 0 {
-			t.Errorf("%v: opened %q", cause, o.Calls)
-		}
 	}
 }
 
 func TestZenityAboutRunnerTimeoutJustCloses(t *testing.T) {
-	z, r, o := newZenity("4.2.1")
+	z, r := newZenity("4.2.1")
 	r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: timed out: %w", context.DeadlineExceeded)
 	if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
 		t.Errorf("got %v", err)
-	}
-	if len(o.Calls) != 0 {
-		t.Errorf("opened %q", o.Calls)
 	}
 }
 
 func TestZenityAboutCancelledContextReturnsCtxErr(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	z, r, o := newZenity("4.2.1")
+	z, r := newZenity("4.2.1")
 	r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w", exitErr(-1))
-	err := z.Show(ctx, about.New("1.2.3"))
-	if !errors.Is(err, context.Canceled) {
+	if err := z.Show(ctx, about.New("1.2.3")); !errors.Is(err, context.Canceled) {
 		t.Errorf("got %v, want context.Canceled", err)
-	}
-	if len(o.Calls) != 0 {
-		t.Errorf("opened %q", o.Calls)
-	}
-}
-
-func TestZenityAboutOpenerFailureIsWebsiteError(t *testing.T) {
-	z, _, o := newZenity("4.2.1")
-	o.Err = errors.New("open: xdg-open failed")
-	err := z.Show(context.Background(), about.New("1.2.3"))
-	var we *WebsiteError
-	want := "about: could not open https://github.com/dol/prezilla: open: xdg-open failed"
-	if !errors.As(err, &we) || err.Error() != want {
-		t.Errorf("got %v, want a WebsiteError %q", err, want)
 	}
 }
 
 func TestZenityAboutMissingBinaryIsErrNoZenity(t *testing.T) {
-	z, r, _ := newZenity("")
+	z, r := newZenity("")
 	cause := &exec.Error{Name: "zenity", Err: exec.ErrNotFound}
 	r.Err["zenity --version"] = fmt.Errorf("zenity: %w", cause)
 	err := z.Show(context.Background(), about.New("1.2.3"))
@@ -153,7 +117,7 @@ func TestZenityAboutMissingBinaryIsErrNoZenity(t *testing.T) {
 }
 
 func TestZenityAboutVersionProbeFailureIsError(t *testing.T) {
-	z, r, _ := newZenity("")
+	z, r := newZenity("")
 	r.Err["zenity --version"] = fmt.Errorf("zenity: %w", exitErr(1))
 	err := z.Show(context.Background(), about.New("1.2.3"))
 	if err == nil || len(r.Calls) != 1 {
@@ -161,15 +125,9 @@ func TestZenityAboutVersionProbeFailureIsError(t *testing.T) {
 	}
 }
 
-func TestZenityAboutNilDependenciesAreHarmless(t *testing.T) {
+func TestZenityAboutNilRunnerIsErrNoZenity(t *testing.T) {
 	if err := (ZenityAbout{}).Show(context.Background(), about.New("1")); !errors.Is(err, ErrNoZenity) {
 		t.Errorf("nil runner: %v", err)
-	}
-	r := &FakeRunner{Out: map[string]string{"zenity --version": "4.2.1"}}
-	err := ZenityAbout{Runner: r}.Show(context.Background(), about.New("1"))
-	var we *WebsiteError
-	if !errors.As(err, &we) {
-		t.Errorf("nil opener: %v", err)
 	}
 }
 
@@ -203,6 +161,13 @@ func TestAboutMarkupLinkOnlyForHTTP(t *testing.T) {
 			t.Errorf("website %q: markup %q", site, got)
 		}
 	}
+	for _, site := range []string{"http://x.y", "https://x.y"} {
+		info := about.New("1")
+		info.Website = site
+		if got := aboutMarkup(info); strings.Count(got, "<a href") != 1 || strings.Count(got, "</a>") != 1 {
+			t.Errorf("website %q: want exactly one link, markup %q", site, got)
+		}
+	}
 	info := about.New("1")
 	info.Website, info.WebsiteLabel = "http://x.y", ""
 	if got := aboutMarkup(info); !strings.HasSuffix(got, `<a href="http://x.y">http://x.y</a>`) {
@@ -231,13 +196,5 @@ func TestAboutMarkupHostileBackslashVersion(t *testing.T) {
 	want := "<b>prezilla</b> 1&lt;b&gt;x&lt;/b&gt;&amp;&quot;&apos;\\\\074i\\\\076\n"
 	if !strings.HasPrefix(got, want) {
 		t.Errorf("markup %q, want prefix %q", got, want)
-	}
-}
-
-func TestWebsiteErrorNamesURL(t *testing.T) {
-	r := &FakeRunner{Out: map[string]string{"zenity --version": "4.2.1"}}
-	err := ZenityAbout{Runner: r}.Show(context.Background(), about.New("1"))
-	if err == nil || err.Error() != "about: could not open https://github.com/dol/prezilla: no opener configured" {
-		t.Errorf("got %v", err)
 	}
 }

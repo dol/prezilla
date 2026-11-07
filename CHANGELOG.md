@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - `prezilla` CLI: `on`, `off`, `toggle`, `status` and `version`.
 - `prezilla about` prints version, license and website.
-- Tray menu entry "About prezilla": a window (via the optional `zenity`) with "Open website" and "Close" buttons; without `zenity`, or if it fails, a desktop notification with the website URL. The `.deb` and `.rpm` packages recommend `zenity`.
+- Tray menu entry "About prezilla": a small window (via the optional `zenity`) with the project link and a "Close" button; without `zenity`, or if it fails, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity`.
 - System tray front-end (`prezilla tray`) with an autostart entry.
 - Tray timer entry showing when presentation mode ends and the minutes left, with a "Reset timer to N min" entry below it while less than N minutes are left (the end time becomes N minutes from now; a later one is kept).
 - Left-click on the tray icon toggles presentation mode; the menu shows a "Presentation mode" checkbox instead of a state label. Toggle clicks within 500 ms of an accepted toggle are ignored, so a double click does not flip the mode twice.

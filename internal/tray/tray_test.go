@@ -646,20 +646,6 @@ func TestAboutShowerBothFailShowsError(t *testing.T) {
 	}
 }
 
-func TestAboutShowerOpenerFailureShownWithoutNotification(t *testing.T) {
-	w := &fakeWindow{err: &system.WebsiteError{Err: errors.New("open: xdg-open failed")}}
-	n := &system.FakeNotifier{}
-	s, _ := newShower(w, n)
-	var a actionState
-	a.run(context.Background(), s.show, func() {})
-	if !strings.Contains(a.text(), "xdg-open failed") || len(n.Calls) != 0 {
-		t.Errorf("text %q notify %v", a.text(), n.Calls)
-	}
-	if tip := tooltip(false, "", a.text(), "", false); !strings.Contains(tip, "(error: ") {
-		t.Errorf("tooltip %q", tip)
-	}
-}
-
 func TestAboutShowerCancelledIsSilent(t *testing.T) {
 	w := &fakeWindow{block: make(chan struct{})}
 	n := &system.FakeNotifier{}
