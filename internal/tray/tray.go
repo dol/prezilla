@@ -137,6 +137,20 @@ func menuState(active bool, timer string, remaining time.Duration, pending bool,
 	}
 }
 
+// tickModel decides the six switch tick boxes, in tickItems order: each is
+// checked as in ticks. A config error (err != nil) disables them all, since
+// a change would have to write the unreadable file.
+func tickModel(ticks map[string]bool, err error) []itemState {
+	items := make([]itemState, len(tickItems))
+	for i, t := range tickItems {
+		items[i] = itemState{
+			Title: t.Title, Tooltip: t.Tooltip,
+			Visible: true, Enabled: err == nil, Checked: ticks[t.ID],
+		}
+	}
+	return items
+}
+
 // quitTooltip is Quit's hover text; the title carries the consequence too,
 // because the library does not export hover text on Linux.
 const quitTooltip = "Closes the tray icon; presentation mode stays as it is."
@@ -165,7 +179,11 @@ func startExtend(ctx context.Context, xt *toggler, a *actionState,
 }
 
 // toggler runs at most one toggle at a time, detached from cancellation.
-type toggler struct{ busy sync.Mutex }
+// timeout bounds each run; zero means core.OperationTimeout.
+type toggler struct {
+	busy    sync.Mutex
+	timeout time.Duration
+}
 
 // start runs fn in a goroutine unless a toggle is already running. fn gets a
 // context that is not cancelled when parent is, so Quit or a signal cannot
@@ -174,7 +192,11 @@ func (t *toggler) start(parent context.Context, fn func(ctx context.Context)) bo
 	if !t.busy.TryLock() {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), core.OperationTimeout)
+	limit := t.timeout
+	if limit <= 0 {
+		limit = core.OperationTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), limit)
 	go func() {
 		defer t.busy.Unlock()
 		defer cancel()
@@ -238,6 +260,91 @@ type Config struct {
 	// Prompter shows that prompt as a notification; nil leaves only the
 	// fallback menu items.
 	Prompter system.Prompter
+	// ConfigPath is config.json, read for the switch tick boxes and written
+	// when one changes.
+	ConfigPath string
+	// Chooser picks the wallpaper image for Choose wallpaper…; nil behaves
+	// like a missing zenity.
+	Chooser system.FileChooser
+	// StartDir is where the chooser opens (the user's home directory).
+	StartDir string
+	// SwitchFor builds one switch; image is the wallpaper path.
+	SwitchFor func(id, image string) (core.Switch, error)
+	// SwitchesFor builds the configured switches; the tray reloads
+	// config.json and uses it before turning the mode on. nil keeps the
+	// engine's list.
+	SwitchesFor func(core.Config) ([]core.Switch, error)
+}
+
+// chooseTimeout bounds one Choose wallpaper… run: the dialog stays open as
+// long as its runner allows (30 minutes), then the engine call follows.
+const chooseTimeout = 30*time.Minute + core.OperationTimeout
+
+// quitChooser closes the dialog of inner when quit ends (Quit or a signal),
+// while the rest of Choose wallpaper… keeps its detached context; a dialog
+// closed that way counts as cancelled. A nil inner reports a missing zenity.
+type quitChooser struct {
+	quit  context.Context
+	inner system.FileChooser
+}
+
+func (q quitChooser) ChooseImage(ctx context.Context, startDir string) (string, error) {
+	if q.inner == nil {
+		return "", fmt.Errorf("%w: no file chooser configured", system.ErrNoZenity)
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(q.quit, cancel)()
+	path, err := q.inner.ChooseImage(cctx, startDir)
+	if err != nil && q.quit.Err() != nil {
+		return "", system.ErrCancelled
+	}
+	return path, err
+}
+
+// newSettings builds the tick box and wallpaper logic from cfg; quit closes
+// an open chooser. The missing-zenity message goes out as a notification
+// when there is a notifier, otherwise it is an error.
+func newSettings(quit context.Context, cfg Config) *settings {
+	s := &settings{
+		ConfigPath: cfg.ConfigPath,
+		Engine:     cfg.Engine,
+		SwitchFor:  cfg.SwitchFor,
+		Chooser:    quitChooser{quit: quit, inner: cfg.Chooser},
+		StartDir:   cfg.StartDir,
+	}
+	if s.SwitchFor == nil {
+		s.SwitchFor = func(id, _ string) (core.Switch, error) {
+			return nil, fmt.Errorf("switch %s: no switch builder configured", id)
+		}
+	}
+	if n := cfg.Notifier; n != nil {
+		s.Notify = func(ctx context.Context, summary, body string) error {
+			nctx, cancel := context.WithTimeout(ctx, actionTimeout)
+			defer cancel()
+			return n.Notify(nctx, summary, body, about.IconName)
+		}
+	}
+	return s
+}
+
+// reloadSwitches reads config.json again and hands the switches it
+// configures to e, so tick changes and hand edits made since the start take
+// effect on the next "on". A load or build error keeps the current list
+// (refresh reports a config error in the tooltip).
+func reloadSwitches(e *core.Engine, path string, build func(core.Config) ([]core.Switch, error)) {
+	if path == "" || build == nil {
+		return
+	}
+	loaded, err := core.LoadConfig(path)
+	if err != nil {
+		return
+	}
+	sw, err := build(loaded)
+	if err != nil {
+		return
+	}
+	e.SetSwitches(sw)
 }
 
 // aboutMessage composes the About notification.
@@ -405,7 +512,11 @@ func Run(ctx context.Context, cfg Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var tg, xt toggler // toggle and Reset timer: at most one of each at a time
+	// toggle, Reset timer, tick change and Choose wallpaper…: at most one of
+	// each at a time. The chooser has its own, so ticks stay usable while
+	// its dialog is open.
+	var tg, xt, kt toggler
+	ct := toggler{timeout: chooseTimeout}
 	shower := &aboutShower{window: cfg.AboutWindow, notifier: cfg.Notifier, info: cfg.About}
 	// redraw asks the menu loop to refresh; coalesced, never blocks.
 	redraw := make(chan struct{}, 1)
@@ -440,13 +551,15 @@ func Run(ctx context.Context, cfg Config) error {
 	// (ItemIsMenu), and the host then sends left clicks as Activate. A host
 	// that never calls Activate still opens the menu.
 	systray.SetOnTapped(func() { requestToggle(toggleReq) })
-	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, shower, coord, redraw, toggleReq) }, cancel)
+	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, &kt, &ct, shower, coord, redraw, toggleReq) }, cancel)
 	cancel()
 	<-watchDone
 	shower.wait()
 	coord.wait()
 	tg.wait()
 	xt.wait()
+	kt.wait()
+	ct.wait()
 	return nil
 }
 
@@ -461,7 +574,7 @@ func requestToggle(req chan<- struct{}) {
 	}
 }
 
-func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt *toggler,
+func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt, kt, ct *toggler,
 	shower *aboutShower, coord *promptCoordinator, redraw <-chan struct{}, toggleReq chan struct{}) {
 	e, timeout, spawn := cfg.Engine, cfg.Timeout, cfg.Spawn
 	step := continueStep(timeout)
@@ -482,14 +595,22 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	resetItem := systray.AddMenuItem(m.Reset.Title, m.Reset.Tooltip)
 	resetItem.Hide()
 	systray.AddSeparator()
+	tickMenu := make([]*systray.MenuItem, len(tickItems))
+	for i, it := range tickModel(nil, nil) {
+		tickMenu[i] = systray.AddMenuItemCheckbox(it.Title, it.Tooltip, false)
+	}
+	chooseItem := systray.AddMenuItem(chooseWallpaperTitle, "Opens a file chooser to pick the wallpaper image.")
+	systray.AddSeparator()
 	aboutItem := systray.AddMenuItem("About Prezilla", "Shows the version, license and website.")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem(m.Quit.Title, m.Quit.Tooltip)
 
+	set := newSettings(ctx, cfg)
 	var mu sync.Mutex // guards lastErr, lastExpiryErr and the visibility flags
 	var lastErr error
-	var actions, extendErr actionState
-	var lastExpiryErr, lastStatusErr string
+	var actions, extendErr, tickErr, chooseErr actionState
+	var lastExpiryErr, lastStatusErr, lastConfigErr string
+	ticksEnabled := true // guarded by mu
 	var timerShown, resetShown, promptShown bool
 	var wasActive, wasDeadline bool // previous refresh, guarded by mu
 	quitShown := m.Quit.Title       // guarded by mu
@@ -520,6 +641,8 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		hasDeadline := st.Active && !st.ExpiresAt.IsZero()
 		if sessionEnded(wasActive, wasDeadline, st.Active, hasDeadline) {
 			clearActionErrors(&actions, &extendErr, coord)
+			tickErr.clear()
+			chooseErr.clear()
 		}
 		wasActive, wasDeadline = st.Active, hasDeadline
 		coord.check(st, now)
@@ -533,7 +656,16 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 			remaining = remainingText(now, st.ExpiresAt)
 			timer = timerLabel(now, st.ExpiresAt.Local())
 		}
+		// Ticks come from the saved state while active, from config.json
+		// otherwise; a config error disables them and is told once.
+		ticks, cfgErr := set.Ticks()
+		cfgNote := noteExpiry(lastConfigErr, cfgErr)
+		lastConfigErr = cfgNote.explained
+		if cfgNote.print {
+			fmt.Fprintln(os.Stderr, cfgNote.explained)
+		}
 		errText := joinErrText(joinErrText(toggleText, actions.text()), joinErrText(extendErr.text(), coord.errText()))
+		errText = joinErrText(errText, joinErrText(joinErrText(tickErr.text(), chooseErr.text()), cfgNote.short))
 		tip := tooltip(st.Active, remaining, errText, expText, prompting)
 		var left time.Duration
 		if timer != "" {
@@ -571,6 +703,21 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		} else {
 			modeItem.Uncheck()
 		}
+		// Same for the tick boxes: the real state on every refresh.
+		ticksModel := tickModel(ticks, cfgErr)
+		for i, it := range ticksModel {
+			if it.Checked {
+				tickMenu[i].Check()
+			} else {
+				tickMenu[i].Uncheck()
+			}
+		}
+		if enabled := cfgErr == nil; enabled != ticksEnabled {
+			ticksEnabled = enabled
+			for _, item := range tickMenu {
+				setEnabled(item, enabled)
+			}
+		}
 		systray.SetIcon(Icon(st.Active))
 		systray.SetTooltip(tip)
 	}
@@ -580,6 +727,9 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	// A click while a toggle runs is dropped.
 	toggle := func() {
 		tg.start(ctx, func(tctx context.Context) {
+			if st, err := e.Status(); err == nil && !st.Active {
+				reloadSwitches(e, cfg.ConfigPath, cfg.SwitchesFor)
+			}
 			_, err := e.Toggle(tctx, timeout)
 			if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
 				err = errors.Join(err, serr)
@@ -591,6 +741,35 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 				fmt.Fprintln(os.Stderr, usererr.Explain(err))
 			}
 			refresh()
+		})
+	}
+
+	// tickReq carries tick box clicks (the switch ID) to the menu loop; one
+	// forwarding goroutine per item, never blocking the D-Bus goroutine.
+	tickReq := make(chan string, len(tickItems))
+	for i, item := range tickMenu {
+		go forwardClicks(ctx, item.ClickedCh, tickItems[i].ID, tickReq)
+	}
+	// setTick flips switch id from its real tick, read when the change
+	// starts (not the item's own checkmark). A click while a tick change
+	// runs is dropped; the next refresh puts the real state back.
+	setTick := func(id string) {
+		kt.start(ctx, func(kctx context.Context) {
+			tickErr.run(kctx, func(c context.Context) error {
+				ticks, err := set.Ticks()
+				if err != nil {
+					return err
+				}
+				return set.SetTick(c, id, !ticks[id])
+			}, refresh)
+		})
+	}
+
+	// choose runs Choose wallpaper… on its own toggler, whose bound allows
+	// for the open dialog; a click while the dialog is open is ignored.
+	choose := func() {
+		ct.start(ctx, func(cctx context.Context) {
+			chooseErr.run(cctx, set.ChooseWallpaper, refresh)
 		})
 	}
 
@@ -616,6 +795,14 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 				toggle()
 			case <-resetItem.ClickedCh:
 				startExtend(ctx, xt, &extendErr, e.Extend, step, refresh)
+			case id := <-tickReq:
+				if tickOpensChooser(cfg.ConfigPath, set, id) {
+					choose()
+				} else {
+					setTick(id)
+				}
+			case <-chooseItem.ClickedCh:
+				choose()
 			case <-aboutItem.ClickedCh:
 				shower.start(ctx, &actions, refresh) // ignored while the window is open
 			case <-quit.ClickedCh:
@@ -623,6 +810,52 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 			}
 		}
 	}()
+}
+
+// opensChooser reports whether a click on tick box id opens the image
+// chooser: ticking Change wallpaper while no image is configured.
+func opensChooser(id string, ticks map[string]bool, image string) bool {
+	return id == core.IDWallpaper && !ticks[id] && image == ""
+}
+
+// tickOpensChooser applies opensChooser to the current ticks and config, so
+// that click runs on the chooser's toggler instead of the tick toggler
+// (SetTick would open the dialog under the short tick bound). A read error
+// returns false, and SetTick reports it.
+func tickOpensChooser(path string, s *settings, id string) bool {
+	if id != core.IDWallpaper {
+		return false
+	}
+	ticks, err := s.Ticks()
+	if err != nil {
+		return false
+	}
+	c, err := core.LoadConfig(path)
+	return err == nil && opensChooser(id, ticks, c.Wallpaper)
+}
+
+// forwardClicks sends id to req for every click on clicked until ctx ends;
+// a click while req is full is dropped.
+func forwardClicks(ctx context.Context, clicked <-chan struct{}, id string, req chan<- string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-clicked:
+			select {
+			case req <- id:
+			default:
+			}
+		}
+	}
+}
+
+func setEnabled(item *systray.MenuItem, on bool) {
+	if on {
+		item.Enable()
+	} else {
+		item.Disable()
+	}
 }
 
 func setVisible(item *systray.MenuItem, show bool) {

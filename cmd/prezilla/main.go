@@ -88,9 +88,28 @@ func run(ctx context.Context) int {
 			AboutWindow: aboutWindow,
 			ScreenSaver: system.DBusScreenSaver{},
 			Prompter:    system.DBusPrompter{},
+			ConfigPath:  core.DefaultConfigPath(),
+			// Like the About window, the chooser waits for the user and
+			// runs from "/".
+			Chooser:  system.ZenityChooser{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}},
+			StartDir: homeDir(),
+			SwitchFor: func(id, image string) (core.Switch, error) {
+				return platform.Switch(desktop, backends, id, image)
+			},
+			SwitchesFor: func(c core.Config) ([]core.Switch, error) {
+				return platform.Switches(desktop, backends, c)
+			},
 		})
 	}
 	return cli.Run(ctx, args, os.Stdout, os.Stderr, d)
+}
+
+// homeDir is where the wallpaper chooser opens: the user's home, or "/".
+func homeDir() string {
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return h
+	}
+	return "/"
 }
 
 // spawnWatcher starts a detached "prezilla watch" that enforces the deadline.

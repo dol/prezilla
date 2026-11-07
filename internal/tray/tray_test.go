@@ -772,3 +772,101 @@ func TestErrorTextsJoinWithoutDoubledPunctuation(t *testing.T) {
 		t.Errorf("tooltip %q", tip)
 	}
 }
+
+func TestTickModelLabelsAndOrder(t *testing.T) {
+	got := tickModel(map[string]bool{}, nil)
+	if len(got) != len(core.SwitchOrder) {
+		t.Fatalf("got %d items, want %d", len(got), len(core.SwitchOrder))
+	}
+	want := []string{"Hide desktop icons", "Disable notifications", "Keep screen awake",
+		"Mute sound", "Minimize windows", "Change wallpaper"}
+	for i, it := range got {
+		if it.Title != want[i] || it.Tooltip != tickItems[i].Tooltip {
+			t.Errorf("item %d = %q/%q, want %q/%q", i, it.Title, it.Tooltip, want[i], tickItems[i].Tooltip)
+		}
+		if !it.Visible || !it.Enabled || it.Checked {
+			t.Errorf("item %d = %+v, want visible, enabled, unchecked", i, it)
+		}
+	}
+}
+
+func TestTickModelDisabledOnConfigError(t *testing.T) {
+	ticks := map[string]bool{core.IDMute: true}
+	for i, it := range tickModel(ticks, errors.New("config: bad json")) {
+		if it.Enabled || !it.Visible {
+			t.Errorf("item %d = %+v, want visible and disabled", i, it)
+		}
+		if it.Checked != ticks[tickItems[i].ID] {
+			t.Errorf("item %d checked = %v, want as in ticks", i, it.Checked)
+		}
+	}
+}
+
+func TestTickModelChecksFollowTicks(t *testing.T) {
+	ticks := map[string]bool{core.IDIcons: true, core.IDWallpaper: true, core.IDMute: false}
+	for i, it := range tickModel(ticks, nil) {
+		if want := ticks[tickItems[i].ID]; it.Checked != want {
+			t.Errorf("%s checked = %v, want %v", tickItems[i].ID, it.Checked, want)
+		}
+	}
+}
+
+func TestOpensChooserOnlyForUntickedWallpaperWithoutImage(t *testing.T) {
+	cases := []struct {
+		id    string
+		ticks map[string]bool
+		image string
+		want  bool
+	}{
+		{core.IDWallpaper, map[string]bool{}, "", true},
+		{core.IDWallpaper, map[string]bool{}, "/pic.png", false},
+		{core.IDWallpaper, map[string]bool{core.IDWallpaper: true}, "", false},
+		{core.IDMute, map[string]bool{}, "", false},
+	}
+	for _, c := range cases {
+		if got := opensChooser(c.id, c.ticks, c.image); got != c.want {
+			t.Errorf("opensChooser(%s, %v, %q) = %v, want %v", c.id, c.ticks, c.image, got, c.want)
+		}
+	}
+}
+
+type blockingChooser struct{}
+
+func (blockingChooser) ChooseImage(ctx context.Context, _ string) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func TestQuitChooserClosesDialogOnQuitAsCancelled(t *testing.T) {
+	quit, stop := context.WithCancel(context.Background())
+	q := quitChooser{quit: quit, inner: blockingChooser{}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := q.ChooseImage(context.Background(), "/home")
+		done <- err
+	}()
+	stop()
+	select {
+	case err := <-done:
+		if !errors.Is(err, system.ErrCancelled) {
+			t.Fatalf("err = %v, want ErrCancelled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("chooser not closed on quit")
+	}
+}
+
+func TestQuitChooserWithoutChooserIsNoZenity(t *testing.T) {
+	q := quitChooser{quit: context.Background()}
+	if _, err := q.ChooseImage(context.Background(), "/"); !errors.Is(err, system.ErrNoZenity) {
+		t.Fatalf("err = %v, want ErrNoZenity", err)
+	}
+}
+
+func TestQuitChooserPassesResult(t *testing.T) {
+	f := &system.FakeChooser{Path: "/pics/a.png"}
+	q := quitChooser{quit: context.Background(), inner: f}
+	if p, err := q.ChooseImage(context.Background(), "/pics"); err != nil || p != "/pics/a.png" {
+		t.Fatalf("got %q, %v", p, err)
+	}
+}
