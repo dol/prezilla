@@ -560,7 +560,7 @@ func TestMinimizeSetFailureTriggersCorrectiveRestore(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "timed out") || saved != "" {
 		t.Fatalf("got (%q, %v)", saved, err)
 	}
-	want := []string{"ShowingDesktop", "SetShowingDesktop true", "SetShowingDesktop false"}
+	want := []string{"ShowingDesktop", "VisibleWindows", "SetShowingDesktop true", "SetShowingDesktop false"}
 	if !slices.Equal(f.Calls, want) {
 		t.Fatalf("calls %v", f.Calls)
 	}
@@ -581,7 +581,7 @@ func TestMinimizeCorrectiveRunsAfterCallerGaveUp(t *testing.T) {
 	if _, err := NewMinimize(f).Enable(cctx); err == nil {
 		t.Fatal("expected error")
 	}
-	if n := len(f.Calls); n != 3 {
+	if n := len(f.Calls); n != 4 {
 		t.Fatalf("calls %v", f.Calls)
 	}
 }
@@ -749,5 +749,117 @@ func TestWallpaperWithoutImageErrorsWithoutTouchingXfconf(t *testing.T) {
 	}
 	if len(f.Calls) != 0 {
 		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMinimizeEnableSavesVisibleWindows(t *testing.T) {
+	f := &system.FakeWindows{Visible: []uint32{10, 20, 30}}
+	saved, err := NewMinimize(f).Enable(ctx)
+	if err != nil || saved != "off:10,20,30" {
+		t.Fatalf("got (%q, %v)", saved, err)
+	}
+	want := []string{"ShowingDesktop", "VisibleWindows", "SetShowingDesktop true"}
+	if !slices.Equal(f.Calls, want) {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMinimizeEnableVisibleWindowsFailureFallsBack(t *testing.T) {
+	f := &system.FakeWindows{VisibleErr: errors.New("x11: boom")}
+	saved, err := NewMinimize(f).Enable(ctx)
+	if err != nil || saved != "off" || !f.Showing {
+		t.Fatalf("got (%q, %v) showing %v", saved, err, f.Showing)
+	}
+}
+
+func TestMinimizeEnableAlreadyShowingDoesNotListWindows(t *testing.T) {
+	f := &system.FakeWindows{Showing: true, Visible: []uint32{1}}
+	saved, err := NewMinimize(f).Enable(ctx)
+	if err != nil || saved != "on" || slices.Contains(f.Calls, "VisibleWindows") {
+		t.Fatalf("got (%q, %v) calls %v", saved, err, f.Calls)
+	}
+}
+
+func TestMinimizeDisableWMStillShowingSetsFalseThenRestores(t *testing.T) {
+	f := &system.FakeWindows{Showing: true}
+	if err := NewMinimize(f).Disable(ctx, "off:10,20"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ShowingDesktop", "SetShowingDesktop false", "RestoreWindows 10,20"}
+	if !slices.Equal(f.Calls, want) || f.Showing {
+		t.Fatalf("calls %v showing %v", f.Calls, f.Showing)
+	}
+}
+
+func TestMinimizeDisableWMAlreadyClearedOnlyRestores(t *testing.T) {
+	f := &system.FakeWindows{Showing: false}
+	if err := NewMinimize(f).Disable(ctx, "off:10,20"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ShowingDesktop", "RestoreWindows 10,20"}
+	if !slices.Equal(f.Calls, want) {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMinimizeDisableLegacyOffOnlyClearsFlag(t *testing.T) {
+	f := &system.FakeWindows{Showing: true}
+	if err := NewMinimize(f).Disable(ctx, "off"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"SetShowingDesktop false"}; !slices.Equal(f.Calls, want) {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMinimizeDisableOnNeverRestores(t *testing.T) {
+	f := &system.FakeWindows{Showing: true}
+	if err := NewMinimize(f).Disable(ctx, "on"); err != nil || len(f.Calls) != 0 {
+		t.Fatalf("err %v calls %v", err, f.Calls)
+	}
+}
+
+func TestMinimizeDisableCorruptIdsIsNoop(t *testing.T) {
+	f := &system.FakeWindows{Showing: true}
+	for _, saved := range []string{"off:", "off:1,", "off:,1", "off:a", "off:-1", "off:01", "off:4294967296", "off: 1", "off;1", "on:1"} {
+		if err := NewMinimize(f).Disable(ctx, saved); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMinimizeDisableSetFailureStillRestoresAndJoins(t *testing.T) {
+	f := &system.FakeWindows{Showing: true, SetErr: errors.New("set boom"), RestoreErr: errors.New("restore boom")}
+	err := NewMinimize(f).Disable(ctx, "off:7")
+	if err == nil || !strings.Contains(err.Error(), "restore desktop: set boom") || !strings.Contains(err.Error(), "restore boom") {
+		t.Fatalf("got %v", err)
+	}
+	if !slices.Contains(f.Calls, "RestoreWindows 7") {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMinimizeDisableRestoreFailureIsReported(t *testing.T) {
+	f := &system.FakeWindows{Showing: true, RestoreErr: errors.New("x11: timed out")}
+	err := NewMinimize(f).Disable(ctx, "off:7")
+	if err == nil || !strings.HasPrefix(err.Error(), "restore desktop: ") || f.Showing {
+		t.Fatalf("got %v showing %v", err, f.Showing)
+	}
+}
+
+func TestMinimizeDisablePassesContext(t *testing.T) {
+	f := &system.FakeWindows{Showing: true}
+	type key struct{}
+	cctx := context.WithValue(ctx, key{}, 1)
+	f.OnRestore = func(c context.Context, _ []uint32) {
+		if c.Value(key{}) != 1 {
+			t.Error("restore got another context")
+		}
+	}
+	if err := NewMinimize(f).Disable(cctx, "off:7"); err != nil {
+		t.Fatal(err)
 	}
 }

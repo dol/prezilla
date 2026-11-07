@@ -10,7 +10,7 @@ back when you are done. XFCE on X11 first; other desktops are planned.
   - `notifications`: enables do-not-disturb in `xfce4-notifyd`
   - `presentation`: turns on `xfce4-power-manager`'s presentation mode, which also keeps the screensaver and screen blanking off while it is on; it needs `xfce4-power-manager` to be running, and it is why the auto-off timeout matters (an unattended session would otherwise keep the screen awake)
   - `mute`: mutes the default audio sink and later unmutes that same output, even if the default changed meanwhile (only if it was not muted before)
-  - `minimize`: shows the desktop (minimizes all windows)
+  - `minimize`: shows the desktop (minimizes all windows); `off` brings back the windows it minimized, even if you switched to one with alt+tab meanwhile, and leaves windows you had minimized before
   - `wallpaper`: swaps the wallpaper on every monitor/workspace; off unless `wallpaper` is set in the config to a path to an image file
 - Auto-disable after 30 minutes by default (`timeout_minutes`, or `--for` per call), enforced by a detached background watcher
 - System tray icon: the menu's **Presentation mode** checkbox toggles presentation mode (so does a click on the icon where your panel sends one), the icon is filled while presenting and outlined while not, and the menu has a **Presentation mode** checkbox, the end time with a **Reset timer** entry, and the remaining time in the tooltip; the same actions are available from the CLI
