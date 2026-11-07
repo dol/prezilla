@@ -43,12 +43,21 @@ func (s wallpaper) Enable(ctx context.Context) (string, error) {
 	}
 	sort.Strings(props)
 	orig := make(map[string]string, len(props))
+	kept := props[:0]
 	for _, p := range props {
 		v, err := s.r.Run(ctx, "xfconf-query", "-c", "xfce4-desktop", "-p", p)
 		if err != nil {
 			return "", fmt.Errorf("xfconf-query %s: %w", p, err)
 		}
+		if v == "" {
+			continue // empty original cannot be restored reliably; leave untouched
+		}
 		orig[p] = v
+		kept = append(kept, p)
+	}
+	props = kept
+	if len(props) == 0 {
+		return "", errors.New("no wallpaper properties found")
 	}
 	data, err := json.Marshal(orig)
 	if err != nil {
@@ -56,8 +65,9 @@ func (s wallpaper) Enable(ctx context.Context) (string, error) {
 	}
 	for i, p := range props {
 		if err := s.set(ctx, p, s.image); err != nil {
-			// Best-effort rollback of the properties already changed.
-			for _, q := range props[:i] {
+			// Best-effort rollback (uses ctx) of the properties already changed,
+			// including the failing one, which may have been partially applied.
+			for _, q := range props[:i+1] {
 				_ = s.set(ctx, q, orig[q])
 			}
 			return "", fmt.Errorf("xfconf-query %s: %w", p, err)

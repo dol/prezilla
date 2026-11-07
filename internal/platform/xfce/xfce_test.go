@@ -248,3 +248,46 @@ func TestWallpaperNoPropertiesErrors(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestWallpaperEnableSetFailureRollsBackIncludingFailingProp(t *testing.T) {
+	wpC := "/backdrop/screen0/monitor2/workspace0/last-image"
+	f := &system.FakeRunner{
+		Out: map[string]string{
+			wpList:      wpA + "\n" + wpB + "\n" + wpC,
+			wpGet + wpA: "/img/a.png",
+			wpGet + wpB: "/img/b.png",
+			wpGet + wpC: "/img/c.png",
+		},
+		Err: map[string]error{wpGet + wpB + " -s /img/pres.png": errors.New("boom")},
+	}
+	if _, err := NewWallpaper(f, "/img/pres.png").Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	has(t, f, wpGet+wpA+" -s /img/a.png")
+	has(t, f, wpGet+wpB+" -s /img/b.png")
+	lacks(t, f, wpGet+wpC+" -s /img/pres.png")
+}
+
+func TestWallpaperEmptyOriginalIsSkipped(t *testing.T) {
+	f := wpFake()
+	f.Out[wpGet+wpB] = ""
+	sw := NewWallpaper(f, "/img/pres.png")
+	saved, err := sw.Enable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, wpGet+wpA+" -s /img/pres.png")
+	lacks(t, f, wpGet+wpB+" -s /img/pres.png")
+	if strings.Contains(saved, wpB) {
+		t.Fatalf("saved %q contains empty prop", saved)
+	}
+	if err := sw.Disable(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, wpGet+wpA+" -s /img/a.png")
+	for _, c := range f.Calls {
+		if strings.HasPrefix(c, wpGet+wpB+" -s") {
+			t.Fatalf("empty prop was set: %q", c)
+		}
+	}
+}
