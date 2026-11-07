@@ -1,15 +1,12 @@
 # Prezilla
 
-One click (or one command) puts your desktop into presentation mode: icons
-hidden, notifications and sound off, windows out of the way, screen kept awake.
-When you are done, or after 30 minutes, everything goes back.
+Prezilla puts your desktop into presentation mode with one click or one command: it hides desktop icons, turns off notifications and sound, clears your windows and keeps the screen awake. When you finish, or after 30 minutes, everything returns to how it was.
 
-XFCE on X11 for now. GNOME, KDE, Windows and macOS are planned.
+It runs on XFCE with X11. GNOME, KDE, Windows and macOS are planned.
 
 ## Install
 
-Packages (`.deb`, `.rpm`, Arch, tarball) are built by the release workflow;
-none is published yet. From source (Go 1.23+):
+Build and install from source with Go 1.23 or newer:
 
 ```bash
 git clone https://github.com/dol/prezilla
@@ -17,49 +14,50 @@ cd prezilla
 make build && sudo make install
 ```
 
-Needs an XFCE session on X11 and, for the tray, a panel with the Status
-Notifier plugin. Nothing else: no `xfconf-query`, `wmctrl` or `pactl`.
-`zenity` is optional and only draws the About window.
+You need an XFCE session on X11. The tray icon also needs a panel with the Status Notifier plugin.
+
+To start the tray at login:
+
+```bash
+mkdir -p ~/.config/autostart
+cp packaging/prezilla.desktop ~/.config/autostart/
+```
 
 ## Use
 
-Start the tray with `prezilla tray` (the packages autostart it). Tick
-**Presentation mode** in its menu to turn the mode on or off.
+Run `prezilla tray`, then tick **Presentation mode** in the tray menu to turn the mode on or off.
 
-From a terminal or a keyboard shortcut:
+The same actions are available from a terminal or a keyboard shortcut:
 
 ```bash
-prezilla on [--for 45m]    # --for 0 = no timeout
+prezilla on --for 45m
 prezilla off
 prezilla toggle
-prezilla status            # inactive | active | active until 15:04
+prezilla status
 ```
 
-The mode ends by itself after `timeout_minutes` (30 by default), so the
-screen can lock again. If the screensaver starts mid-talk, the tray asks
-whether to keep presenting.
+`status` prints `inactive`, `active` or `active until 15:04`. `--for 0` turns the timer off for that session.
 
-**Tray clicks:** whether a click on the icon itself toggles depends on the
-panel. With the XFCE systray's "menu is primary" option on (the default), a
-left click opens the menu and a middle click toggles.
+The mode ends by itself after 30 minutes, so your screen can lock again. If the screensaver starts during a talk, the tray asks whether to keep presenting.
 
-## What it switches
+Whether a click on the tray icon toggles the mode depends on your panel. With the default XFCE panel settings, a left click opens the menu and a middle click toggles.
+
+## Switches
+
+Each switch saves the original value and restores it, so settings that were already off stay off.
 
 | Switch | Effect |
 | --- | --- |
-| `icons` | hides desktop icons |
-| `notifications` | turns on do-not-disturb |
-| `presentation` | XFCE power manager's presentation mode (no screensaver, no blanking) |
-| `mute` | mutes the default output |
-| `minimize` | shows the desktop; windows come back on `off` |
-| `wallpaper` | swaps the wallpaper (only if `wallpaper` is set) |
-
-Each switch saves the original value and puts it back, so things that were
-already off stay off.
+| `icons` | Hides desktop icons |
+| `notifications` | Turns on do-not-disturb |
+| `presentation` | Turns on the XFCE power manager's presentation mode, which stops the screensaver and screen blanking |
+| `mute` | Mutes the default output |
+| `minimize` | Shows the desktop and brings the windows back afterwards |
+| `wallpaper` | Swaps the wallpaper, only when `wallpaper` is set |
 
 ## Configure
 
-`~/.config/prezilla/config.json`; every key is optional:
+Prezilla reads `~/.config/prezilla/config.json`. Every key is optional:
 
 ```json
 {
@@ -69,31 +67,27 @@ already off stay off.
 }
 ```
 
-Setting `wallpaper` adds the `wallpaper` switch. `timeout_minutes: 0` turns
-the auto-off off.
+Setting `wallpaper` adds the `wallpaper` switch. Setting `timeout_minutes` to `0` removes the timer.
 
 ## Troubleshooting
 
-Errors say what failed and what to do; the technical detail follows in
-parentheses on stderr.
+Errors name what failed and what to do next. Technical details follow in parentheses on stderr.
 
-- **A switch fails:** the others still apply. Fix the cause (or remove that
-  switch from `switches`), then run `prezilla off` and `on` again.
-- **No tray icon:** the panel needs the Status Notifier plugin. The CLI works
-  without it.
-- **Saved state unreadable:** `~/.local/state/prezilla/state.json` is damaged.
-  Put your settings back by hand, then delete the file.
+- **A switch fails**: the other switches still apply. Fix the cause or remove that switch from `switches`, then run `prezilla off` and `prezilla on` again
+- **No tray icon**: add the Status Notifier plugin to your panel. The commands work without it
+- **Saved state unreadable**: restore your settings by hand, then delete `~/.local/state/prezilla/state.json`
 
-Exit codes: `0` ok, `1` a switch, state or config error, `2` bad usage.
+Exit codes: `0` success, `1` switch, state or config error, `2` usage error.
 
 ## Development
+
+Run the tests with:
 
 ```bash
 go test ./...
 ```
 
-Tests never touch the real desktop; each backend sits behind an interface with
-a fake. See [CHANGELOG.md](CHANGELOG.md) for what changed.
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## License
 
