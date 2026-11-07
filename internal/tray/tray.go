@@ -49,6 +49,43 @@ func remainingText(now, expires time.Time) string {
 	return fmt.Sprintf("%d min left", mins)
 }
 
+// tooltip composes the tooltip: the state label, the remaining time when
+// there is one, and the last error text when non-empty.
+func tooltip(active bool, remaining, errText string) string {
+	_, tip := Labels(active)
+	if remaining != "" {
+		tip += ", " + remaining
+	}
+	if errText != "" {
+		tip += " (error: " + errText + ")"
+	}
+	return tip
+}
+
+// toggler runs at most one toggle at a time, detached from cancellation.
+type toggler struct{ busy sync.Mutex }
+
+// start runs fn in a goroutine unless a toggle is already running. fn gets a
+// context that is not cancelled when parent is, so Quit or a signal cannot
+// abort a half-applied toggle. It reports whether fn was started.
+func (t *toggler) start(parent context.Context, fn func(ctx context.Context)) bool {
+	if !t.busy.TryLock() {
+		return false
+	}
+	ctx := context.WithoutCancel(parent)
+	go func() {
+		defer t.busy.Unlock()
+		fn(ctx)
+	}()
+	return true
+}
+
+// wait blocks until any running toggle has finished.
+func (t *toggler) wait() {
+	t.busy.Lock()
+	t.busy.Unlock() //nolint:staticcheck // empty critical section is the point
+}
+
 // hostAvailable reports whether a StatusNotifier watcher owns its bus name.
 // fyne.io/systray only logs registration failures, so check up front.
 func hostAvailable() bool {
@@ -69,38 +106,57 @@ func Run(ctx context.Context, e *core.Engine, timeout time.Duration) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	systray.Run(func() { onReady(ctx, cancel, e, timeout) }, cancel)
+	var tg toggler
+	systray.Run(func() { onReady(ctx, cancel, e, timeout, &tg) }, cancel)
+	tg.wait()
 	return nil
 }
 
-func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, timeout time.Duration) {
+func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, timeout time.Duration, tg *toggler) {
 	systray.SetIcon(Icon(false))
 	systray.SetTitle("prezilla")
 	toggle := systray.AddMenuItem("", "")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit", "Quit prezilla")
 
-	var mu sync.Mutex // guards lastErr
+	var mu sync.Mutex // guards lastErr and lastExpiryErr
 	var lastErr error
-	var busy sync.Mutex // serialises toggles; overlapping clicks are dropped
+	var lastExpiryErr string
 
 	refresh := func() {
-		_, _ = e.DisableIfExpired(ctx)
+		_, expErr := e.DisableIfExpired(ctx)
 		st, err := e.Status()
 		mu.Lock()
 		defer mu.Unlock()
+		expText := ""
+		if expErr != nil {
+			expText = expErr.Error()
+		}
+		if expText != lastExpiryErr {
+			lastExpiryErr = expText
+			if expText != "" {
+				fmt.Fprintln(os.Stderr, expErr)
+			}
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			systray.SetTooltip("prezilla: " + err.Error())
 			return
 		}
-		title, tip := Labels(st.Active)
-		if r := remainingText(time.Now(), st.ExpiresAt); st.Active && r != "" {
-			tip += ", " + r
+		title, _ := Labels(st.Active)
+		var errText string
+		switch {
+		case lastErr != nil:
+			errText = lastErr.Error()
+		case expText != "":
+			errText = expText
 		}
-		if lastErr != nil {
-			tip += " (error: " + lastErr.Error() + ")"
-		}
+		tip := tooltip(st.Active, func() string {
+			if st.Active {
+				return remainingText(time.Now(), st.ExpiresAt)
+			}
+			return ""
+		}(), errText)
 		systray.SetIcon(Icon(st.Active))
 		toggle.SetTitle(title)
 		systray.SetTooltip(tip)
@@ -118,12 +174,8 @@ func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, tim
 			case <-t.C:
 				refresh()
 			case <-toggle.ClickedCh:
-				if !busy.TryLock() {
-					continue
-				}
-				go func() {
-					defer busy.Unlock()
-					_, err := e.Toggle(ctx, timeout)
+				tg.start(ctx, func(tctx context.Context) {
+					_, err := e.Toggle(tctx, timeout)
 					mu.Lock()
 					lastErr = err
 					mu.Unlock()
@@ -131,7 +183,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, tim
 						fmt.Fprintln(os.Stderr, err)
 					}
 					refresh()
-				}()
+				})
 			case <-quit.ClickedCh:
 				cancel()
 			}
