@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,14 +51,21 @@ func remainingText(now, expires time.Time) string {
 }
 
 // tooltip composes the tooltip: the state label, the remaining time when
-// there is one, and the last error text when non-empty.
-func tooltip(active bool, remaining, errText string) string {
+// there is one, and the last toggle and expiry error texts when non-empty
+// (both are shown, joined with "; ").
+func tooltip(active bool, remaining, toggleErr, expiryErr string) string {
 	_, tip := Labels(active)
 	if remaining != "" {
 		tip += ", " + remaining
 	}
-	if errText != "" {
-		tip += " (error: " + errText + ")"
+	var errs []string
+	for _, e := range []string{toggleErr, expiryErr} {
+		if e != "" {
+			errs = append(errs, e)
+		}
+	}
+	if len(errs) > 0 {
+		tip += " (error: " + strings.Join(errs, "; ") + ")"
 	}
 	return tip
 }
@@ -162,19 +170,16 @@ func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, tim
 			return
 		}
 		title, _ := Labels(st.Active)
-		var errText string
-		switch {
-		case lastErr != nil:
-			errText = lastErr.Error()
-		case expText != "":
-			errText = expText
+		var toggleText string
+		if lastErr != nil {
+			toggleText = lastErr.Error()
 		}
 		tip := tooltip(st.Active, func() string {
 			if st.Active {
 				return remainingText(time.Now(), st.ExpiresAt)
 			}
 			return ""
-		}(), errText)
+		}(), toggleText, expText)
 		systray.SetIcon(Icon(st.Active))
 		toggle.SetTitle(title)
 		systray.SetTooltip(tip)

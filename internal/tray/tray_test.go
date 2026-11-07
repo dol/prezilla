@@ -60,17 +60,20 @@ func TestTooltip(t *testing.T) {
 	cases := []struct {
 		active    bool
 		remaining string
-		errText   string
+		toggleErr string
+		expiryErr string
 		want      string
 	}{
-		{false, "", "", "prezilla: presentation mode off"},
-		{true, "", "", "prezilla: presentation mode on"},
-		{true, "3 min left", "", "prezilla: presentation mode on, 3 min left"},
-		{false, "", "boom", "prezilla: presentation mode off (error: boom)"},
-		{true, "1 min left", "boom", "prezilla: presentation mode on, 1 min left (error: boom)"},
+		{false, "", "", "", "prezilla: presentation mode off"},
+		{true, "", "", "", "prezilla: presentation mode on"},
+		{true, "3 min left", "", "", "prezilla: presentation mode on, 3 min left"},
+		{false, "", "boom", "", "prezilla: presentation mode off (error: boom)"},
+		{true, "1 min left", "boom", "", "prezilla: presentation mode on, 1 min left (error: boom)"},
+		{true, "", "", "expired", "prezilla: presentation mode on (error: expired)"},
+		{true, "", "boom", "expired", "prezilla: presentation mode on (error: boom; expired)"},
 	}
 	for _, c := range cases {
-		if got := tooltip(c.active, c.remaining, c.errText); got != c.want {
+		if got := tooltip(c.active, c.remaining, c.toggleErr, c.expiryErr); got != c.want {
 			t.Errorf("got %q want %q", got, c.want)
 		}
 	}
