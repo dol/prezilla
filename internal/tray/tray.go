@@ -376,6 +376,15 @@ func noteExpiry(prev string, err error) expiryNote {
 	return n
 }
 
+// statusTooltip is the tooltip when the state cannot be read: the sentence
+// with the "Prezilla: " prefix, unless it already starts with the name.
+func statusTooltip(sentence string) string {
+	if strings.HasPrefix(sentence, "Prezilla") {
+		return sentence
+	}
+	return "Prezilla: " + sentence
+}
+
 // joinErrText joins two non-empty error texts with "; ".
 func joinErrText(a, b string) string {
 	switch {
@@ -510,7 +519,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	var mu sync.Mutex // guards lastErr, lastExpiryErr and the visibility flags
 	var lastErr error
 	var actions, extendErr actionState
-	var lastExpiryErr string
+	var lastExpiryErr, lastStatusErr string
 	var timerShown, resetShown, promptShown bool
 	quitShown := m.Quit.Title // guarded by mu
 
@@ -527,9 +536,13 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		if note.print {
 			fmt.Fprintln(os.Stderr, note.explained)
 		}
+		stNote := noteExpiry(lastStatusErr, err)
+		lastStatusErr = stNote.explained
 		if err != nil {
-			fmt.Fprintln(os.Stderr, usererr.Explain(err))
-			systray.SetTooltip("Prezilla: " + usererr.Short(err))
+			if stNote.print {
+				fmt.Fprintln(os.Stderr, stNote.explained)
+			}
+			systray.SetTooltip(statusTooltip(stNote.short))
 			return
 		}
 		now := time.Now()

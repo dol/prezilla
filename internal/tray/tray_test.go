@@ -761,3 +761,24 @@ func TestMenuStateQuitTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusTooltipPrefix(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"boom", "Prezilla: boom"},
+		{"Prezilla's saved state (/x) is unreadable.", "Prezilla's saved state (/x) is unreadable."},
+		{"Prezilla supports XFCE only.", "Prezilla supports XFCE only."},
+	} {
+		if got := statusTooltip(c.in); got != c.want {
+			t.Errorf("statusTooltip(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestNoteExpiryResetsWhenCleared(t *testing.T) {
+	err := errors.New("boom")
+	n := noteExpiry("", err)
+	n = noteExpiry(n.explained, nil)
+	if again := noteExpiry(n.explained, err); !again.print {
+		t.Error("an error that came back after clearing must print again")
+	}
+}
