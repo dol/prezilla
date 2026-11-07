@@ -205,3 +205,55 @@ func TestUpdateConfigDropsEmptyWallpaperKey(t *testing.T) {
 		t.Fatalf("wallpaper key kept: %s", readFile(t, p))
 	}
 }
+
+func TestUpdateConfigWritesThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dotfiles", "config.json")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte(`{"switches":["icons"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "prezilla", "config.json")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateConfig(link, func(c *Config) { *c = c.With(IDMute, true) }); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(link)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("config.json is no longer a symlink (mode %v, err %v)", fi.Mode(), err)
+	}
+	cfg, err := LoadConfig(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.Switches, []string{"icons", "mute"}) {
+		t.Errorf("target switches = %v, want [icons mute]", cfg.Switches)
+	}
+}
+
+func TestUpdateConfigKeepsFileMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"switches":["icons"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateConfig(path, func(c *Config) { *c = c.With(IDMute, true) }); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("mode = %v, want 0600", got)
+	}
+}

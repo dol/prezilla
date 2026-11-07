@@ -135,7 +135,16 @@ func UpdateConfig(path string, fn func(*Config)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if err := writeFileAtomic(path, append(data, '\n'), 0o755, 0o644, "config"); err != nil {
+	// Write through a symlink (dotfile managers) and keep the file's
+	// permission bits; a new file gets 0644.
+	target, perm := path, os.FileMode(0o644)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		target = resolved
+	}
+	if fi, err := os.Stat(target); err == nil {
+		perm = fi.Mode().Perm()
+	}
+	if err := writeFileAtomic(target, append(data, '\n'), 0o755, perm, "config"); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
