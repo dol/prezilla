@@ -87,8 +87,8 @@ func (w X11Windows) ShowingDesktop(ctx context.Context) (bool, error) {
 
 // showingDesktopGet reads _NET_SHOWING_DESKTOP from the root window. Unlike
 // ewmh.ShowingDesktopGet it treats a missing property as false: xfwm4 only
-// sets it after the desktop has been shown once, and wmctrl -m reported OFF
-// in that case too. Other errors (bad reply, connection) still fail.
+// sets it after the desktop has been shown once, which means not showing.
+// Other errors (bad reply, connection) still fail.
 func showingDesktopGet(xu *xgbutil.XUtil) (bool, error) {
 	atom, err := xprop.Atm(xu, "_NET_SHOWING_DESKTOP")
 	if err != nil {

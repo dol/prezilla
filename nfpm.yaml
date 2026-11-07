@@ -9,14 +9,6 @@ description: Toggle presentation mode (icons, notifications, mute, minimize, wal
 homepage: https://github.com/dol/prezilla
 license: Apache-2.0
 
-overrides:
-  deb:
-    recommends: [wmctrl, pulseaudio-utils]
-  rpm:
-    recommends: [wmctrl, pulseaudio-utils]
-  archlinux:
-    recommends: [wmctrl, libpulse]
-
 contents:
   - src: dist/prezilla-linux-amd64
     dst: /usr/bin/prezilla

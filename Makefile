@@ -24,7 +24,7 @@ LDFLAGS := -X main.version=$(VERSION)
 all: lint test
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o prezilla ./cmd/prezilla
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o prezilla ./cmd/prezilla
 
 test:
 	go test ./...

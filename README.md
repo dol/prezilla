@@ -15,16 +15,10 @@ back when you are done. XFCE on X11 first; other desktops are planned.
 - System tray icon with a toggle and remaining time in the tooltip; the same actions are available from the CLI
 
 ## Requirements
-- XFCE on X11 (Wayland is not supported)
-- `xfconf-query` (from `xfconf`)
-- `pactl` (Debian/Ubuntu: `pulseaudio-utils`)
-- `wmctrl`
+- An XFCE session on X11 (Wayland is not supported); `xfconf-query` comes with it
 - For the tray: a panel with the Status Notifier plugin (the CLI works without it)
 
-On Debian/Ubuntu:
-```
-sudo apt install xfconf pulseaudio-utils wmctrl
-```
+No other packages are needed. Mute talks to PulseAudio/PipeWire-pulse over its native protocol, and show-desktop sets the EWMH `_NET_SHOWING_DESKTOP` property directly. The PulseAudio server is found via `PULSE_SERVER` or `$XDG_RUNTIME_DIR/pulse/native`; `default-server` in `client.conf` is not read.
 
 ## Installation
 
@@ -105,7 +99,10 @@ With a wallpaper (setting `wallpaper` adds the `wallpaper` switch automatically)
 State (the saved original values and the deadline) is kept in `$XDG_STATE_HOME/prezilla/state.json`, by default `~/.local/state/prezilla/state.json`. Delete it only if you do not need the originals back.
 
 ## Troubleshooting
-- **A tool is missing or fails**: the error names the tool (for example `pactl: ...`). The other switches are still applied; install the tool and run `prezilla off`, then `on`.
+- **A switch fails**: the error names the cause. The other switches are still applied; fix the cause and run `prezilla off`, then `on`.
+  - `pulse: connect: ...`: no PulseAudio/PipeWire-pulse server is reachable. Check `PULSE_SERVER` and `$XDG_RUNTIME_DIR/pulse/native`.
+  - `x11: connect: ...`: no X display. `DISPLAY` is unset, for example in a Wayland-only session, which is not supported.
+  - `xfconf-query` not found: this is not an XFCE session.
 - **No tray icon**: `prezilla tray` reports that no StatusNotifier host was found. Add the Status Notifier plugin to the panel, or use `prezilla toggle` from a shortcut or terminal.
 - **`unsupported desktop`**: `XDG_CURRENT_DESKTOP` must contain `XFCE`.
 
