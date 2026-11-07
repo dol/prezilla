@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"prezilla/internal/core"
 	"prezilla/internal/system"
@@ -41,9 +42,12 @@ const (
 )
 
 // settings holds the switch tick and wallpaper logic behind the tray menu.
-// Each method must be called from one goroutine at a time; the tray
-// serialises them.
+// Its methods may run at the same time (a tick change while the chooser
+// dialog is open): mu serialises every engine-and-config sequence, and is
+// never held while the dialog is open.
 type settings struct {
+	mu sync.Mutex
+
 	ConfigPath string
 	Engine     settingsEngine
 	// SwitchFor builds the switch id; image is the wallpaper path and is
@@ -89,32 +93,44 @@ func (s *settings) Ticks() (map[string]bool, error) {
 // Ticking the wallpaper switch without an image opens the chooser instead,
 // and a configured image that is gone is reported without changing anything.
 func (s *settings) SetTick(ctx context.Context, id string, on bool) error {
+	s.mu.Lock()
+	choose, err := s.setTickLocked(ctx, id, on)
+	s.mu.Unlock()
+	if choose {
+		return s.ChooseWallpaper(ctx)
+	}
+	return err
+}
+
+// setTickLocked is SetTick under mu; choose reports that the chooser has to
+// open instead (after mu is released).
+func (s *settings) setTickLocked(ctx context.Context, id string, on bool) (choose bool, err error) {
 	cfg, err := core.LoadConfig(s.ConfigPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if on && id == core.IDWallpaper {
 		if cfg.Wallpaper == "" {
-			return s.ChooseWallpaper(ctx)
+			return true, nil
 		}
 		if err := imageExists(cfg.Wallpaper); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if on {
 		sw, err := s.SwitchFor(id, cfg.Wallpaper)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if _, err := s.Engine.EnableOne(ctx, sw); err != nil {
-			return err
+			return false, err
 		}
 	} else if _, err := s.Engine.DisableOne(ctx, id); err != nil {
-		return err
+		return false, err
 	}
 	// Active or not (the mode may have ended meanwhile), the choice is saved.
 	_, err = core.UpdateConfig(s.ConfigPath, func(c *core.Config) { *c = c.With(id, on) })
-	return err
+	return false, err
 }
 
 // ChooseWallpaper asks for an image and, when one is chosen, saves it with
@@ -122,12 +138,16 @@ func (s *settings) SetTick(ctx context.Context, id string, on bool) error {
 // applied at once: the saved original is restored first, then the switch is
 // applied with the new image, so the original stays the one saved. A
 // cancelled chooser changes nothing; a missing zenity sends one notification
-// instead of an error.
+// instead of an error. Only the dialog runs under ctx (which may be long);
+// everything after it is bounded by core.OperationTimeout, since the engine
+// holds the state lock for as long as its context allows.
 func (s *settings) ChooseWallpaper(ctx context.Context) error {
 	if _, err := core.LoadConfig(s.ConfigPath); err != nil {
 		return err
 	}
 	path, err := s.Chooser.ChooseImage(ctx, s.StartDir)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), core.OperationTimeout)
+	defer cancel()
 	switch {
 	case errors.Is(err, system.ErrCancelled):
 		return nil
@@ -139,6 +159,8 @@ func (s *settings) ChooseWallpaper(ctx context.Context) error {
 	case err != nil:
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := system.ValidateImage(path); err != nil {
 		return err
 	}

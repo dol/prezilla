@@ -665,7 +665,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 			fmt.Fprintln(os.Stderr, cfgNote.explained)
 		}
 		errText := joinErrText(joinErrText(toggleText, actions.text()), joinErrText(extendErr.text(), coord.errText()))
-		errText = joinErrText(errText, joinErrText(joinErrText(tickErr.text(), chooseErr.text()), cfgNote.short))
+		errText = joinErrText(errText, settingsErrText(tickErr.text(), chooseErr.text(), cfgNote.short))
 		tip := tooltip(st.Active, remaining, errText, expText, prompting)
 		var left time.Duration
 		if timer != "" {
@@ -810,6 +810,19 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 			}
 		}
 	}()
+}
+
+// settingsErrText joins the tick, chooser and config error texts for the
+// tooltip, leaving out a tick or chooser text that repeats an earlier one
+// (a click on a broken config reports the config sentence again).
+func settingsErrText(tick, choose, config string) string {
+	if tick == config {
+		tick = ""
+	}
+	if choose == config || choose == tick {
+		choose = ""
+	}
+	return joinErrText(joinErrText(tick, choose), config)
 }
 
 // opensChooser reports whether a click on tick box id opens the image

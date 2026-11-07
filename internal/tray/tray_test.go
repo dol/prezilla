@@ -870,3 +870,19 @@ func TestQuitChooserPassesResult(t *testing.T) {
 		t.Fatalf("got %q, %v", p, err)
 	}
 }
+
+func TestSettingsErrTextSkipsRepeatOfConfigError(t *testing.T) {
+	const cfgErr = "The configuration file isn't valid JSON."
+	if got := settingsErrText("", cfgErr, cfgErr); got != cfgErr {
+		t.Errorf("got %q, want the config sentence once", got)
+	}
+	if got := settingsErrText(cfgErr, cfgErr, cfgErr); got != cfgErr {
+		t.Errorf("got %q, want the config sentence once", got)
+	}
+	if got := settingsErrText("Tick failed.", "Choose failed.", ""); got != "Tick failed. Choose failed." {
+		t.Errorf("got %q", got)
+	}
+	if got := settingsErrText("Same.", "Same.", ""); got != "Same." {
+		t.Errorf("got %q", got)
+	}
+}

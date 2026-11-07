@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"prezilla/internal/core"
 	"prezilla/internal/system"
@@ -30,11 +31,20 @@ type fakeSettingsEngine struct {
 	opErr error
 	ended bool // reports (false, nil) from EnableOne/DisableOne
 	calls []string
+	// deadlines records the ctx deadline of each EnableOne/DisableOne call
+	// (zero when there is none).
+	deadlines []time.Time
+}
+
+func (f *fakeSettingsEngine) noteDeadline(ctx context.Context) {
+	d, _ := ctx.Deadline()
+	f.deadlines = append(f.deadlines, d)
 }
 
 func (f *fakeSettingsEngine) Status() (core.State, error) { return f.st, f.stErr }
 
-func (f *fakeSettingsEngine) EnableOne(_ context.Context, sw core.Switch) (bool, error) {
+func (f *fakeSettingsEngine) EnableOne(ctx context.Context, sw core.Switch) (bool, error) {
+	f.noteDeadline(ctx)
 	img := ""
 	if fs, ok := sw.(fakeSwitch); ok {
 		img = fs.image
@@ -53,7 +63,8 @@ func (f *fakeSettingsEngine) EnableOne(_ context.Context, sw core.Switch) (bool,
 	return true, nil
 }
 
-func (f *fakeSettingsEngine) DisableOne(_ context.Context, id string) (bool, error) {
+func (f *fakeSettingsEngine) DisableOne(ctx context.Context, id string) (bool, error) {
+	f.noteDeadline(ctx)
 	f.calls = append(f.calls, "disable "+id)
 	if f.ended || !f.st.Active {
 		return false, nil
@@ -530,5 +541,96 @@ func TestChooseWallpaperEngineFailureWritesNothing(t *testing.T) {
 	}
 	if got := f.readConfigText(t); got != raw {
 		t.Errorf("config changed to %q", got)
+	}
+}
+
+func TestChooseWallpaperEngineCallsBoundedByOperationTimeout(t *testing.T) {
+	f := newSettingsFixture(t)
+	f.writeConfig(t, `{"switches": ["icons", "wallpaper"]}`)
+	f.activate("icons", "wallpaper")
+	f.chooser.Path = f.image(t, "new.png")
+	long, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	for name, ctx := range map[string]context.Context{
+		"no deadline":   context.Background(),
+		"long deadline": long,
+	} {
+		f.eng.deadlines = nil
+		start := time.Now()
+		if err := f.s.ChooseWallpaper(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if len(f.eng.deadlines) != 2 {
+			t.Fatalf("%s: %d engine calls, want 2", name, len(f.eng.deadlines))
+		}
+		for i, d := range f.eng.deadlines {
+			if d.IsZero() || d.After(time.Now().Add(core.OperationTimeout)) || d.Before(start) {
+				t.Errorf("%s: call %d deadline %v, want within OperationTimeout of now", name, i, d)
+			}
+		}
+	}
+}
+
+// gateChooser is a FileChooser that reports when its dialog is open and
+// returns path only once release is closed.
+type gateChooser struct {
+	path    string
+	opened  chan struct{}
+	release chan struct{}
+}
+
+func (g *gateChooser) ChooseImage(context.Context, string) (string, error) {
+	close(g.opened)
+	<-g.release
+	return g.path, nil
+}
+
+func TestSetTickAndChooseWallpaperConcurrentKeepBothChanges(t *testing.T) {
+	f := newSettingsFixture(t)
+	f.writeConfig(t, `{"switches": ["icons"]}`)
+	img := f.image(t, "new.png")
+	g := &gateChooser{path: img, opened: make(chan struct{}), release: make(chan struct{})}
+	f.s.Chooser = g
+	done := make(chan error, 1)
+	go func() { done <- f.s.ChooseWallpaper(context.Background()) }()
+	<-g.opened
+	tickDone := make(chan error, 1)
+	go func() { tickDone <- f.s.SetTick(context.Background(), core.IDMute, true) }()
+	if err := <-tickDone; err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	cfg := f.config(t)
+	if want := []string{"icons", "mute", "wallpaper"}; cfg.Wallpaper != img || !slices.Equal(cfg.Switches, want) {
+		t.Errorf("config %+v, want wallpaper %q and switches %v", cfg, img, want)
+	}
+}
+
+func TestSetTickNotBlockedWhileChooserOpen(t *testing.T) {
+	f := newSettingsFixture(t)
+	f.writeConfig(t, `{"switches": ["icons"]}`)
+	g := &gateChooser{opened: make(chan struct{}), release: make(chan struct{})}
+	f.s.Chooser = g
+	// Ticking Change wallpaper without an image opens the dialog via SetTick.
+	done := make(chan error, 1)
+	go func() { done <- f.s.SetTick(context.Background(), core.IDWallpaper, true) }()
+	<-g.opened
+	tickDone := make(chan error, 1)
+	go func() { tickDone <- f.s.SetTick(context.Background(), core.IDMute, true) }()
+	select {
+	case err := <-tickDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SetTick blocked while the chooser was open")
+	}
+	close(g.release) // empty path: rejected, nothing saved for the wallpaper
+	<-done
+	if cfg := f.config(t); !cfg.Has(core.IDMute) {
+		t.Errorf("mute not saved: %+v", cfg)
 	}
 }
