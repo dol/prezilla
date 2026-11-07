@@ -67,9 +67,11 @@ func run(ctx context.Context) int {
 	d.Tray = func(ctx context.Context) error {
 		return tray.Run(ctx, tray.Config{
 			Engine: d.Engine, Timeout: cfg.Timeout(), Spawn: spawnWatcher,
-			About:    about.New(version),
-			Notifier: system.DBusNotifier{},
-			Opener:   system.ExecOpener{Runner: system.ExecRunner{}},
+			About:       about.New(version),
+			Notifier:    system.DBusNotifier{},
+			Opener:      system.ExecOpener{Runner: system.ExecRunner{}},
+			ScreenSaver: system.DBusScreenSaver{},
+			Prompter:    system.DBusPrompter{},
 		})
 	}
 	return cli.Run(ctx, args, os.Stdout, os.Stderr, d)

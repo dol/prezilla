@@ -12,7 +12,8 @@ back when you are done. XFCE on X11 first; other desktops are planned.
   - `minimize`: shows the desktop (minimizes all windows)
   - `wallpaper`: swaps the wallpaper on every monitor/workspace; off unless `wallpaper` is set in the config to a path to an image file
 - Auto-disable after 30 minutes by default (`timeout_minutes`, or `--for` per call), enforced by a detached background watcher
-- System tray icon with a toggle and remaining time in the tooltip; the same actions are available from the CLI
+- System tray icon with a toggle, a timer entry (end time and minutes left) and the remaining time in the tooltip; the same actions are available from the CLI
+- When the screensaver starts while a timed session is still running, the tray asks whether to continue presenting
 
 ## Requirements
 - An XFCE session on X11 (Wayland is not supported); `xfconf-query` comes with it
@@ -69,6 +70,9 @@ prezilla version
 - `off` restores everything and is a no-op when inactive.
 - `status` prints one of `inactive`, `active` or `active until HH:MM`, and first disables the mode if its deadline has passed.
 - `tray` runs the tray icon until you choose Quit. Its menu has the toggle item, **About prezilla** (shows version, license and website as a desktop notification) and **Project website** (opens the website in your browser). Errors from these two entries appear in the tooltip and on stderr. Presentation mode's do-not-disturb may hide the About notification while the mode is on. `xdg-open` or `exo-open` is needed only for the website link.
+- While a deadline is set, the top of the tray menu shows a greyed-out timer entry such as `Ends 15:04 · 12 min left`, refreshed every 2 seconds; the tooltip keeps `, N min left`.
+- **Screensaver prompt**: if the screensaver starts while presentation mode is on and its deadline has not passed, the tray shows one sticky notification, "Presentation still running", with the actions **Continue presenting** (restarts the configured timeout from now; the saved originals are untouched) and **End presentation** (same as `off`). Closing the notification changes nothing, and the timer still ends the session. While the question is open, the tray menu also shows **Continue presentation** and **End presentation**, and the tooltip adds `Screensaver started: continue presenting?`. The first answer wins, and the other is closed. If the session ends or expires first, the question is withdrawn. The screensaver is watched through the `ActiveChanged` D-Bus signal of `org.xfce.ScreenSaver`, `org.freedesktop.ScreenSaver` and `org.gnome.ScreenSaver`. With `timeout_minutes: 0` there is no deadline, so there is never a question.
+  - Caveat: presentation mode's own do-not-disturb may hide the notification. It is sent with critical urgency, which some notification daemons show anyway, but this has not been verified on every daemon, so the two menu entries are the guaranteed way to answer. If the notification server lacks the `actions` capability, the error appears in the tooltip and the menu entries still work.
 - `about` prints the name, version, description, license and website. Like `version`, it needs no config and works on any desktop.
 - When a deadline is set, `on`/`toggle` and turning the mode on from the tray start a detached `prezilla watch` that restores everything at expiry, even after the tray quits (the tray also checks every 2 seconds).
 

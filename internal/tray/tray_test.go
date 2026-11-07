@@ -64,18 +64,21 @@ func TestTooltip(t *testing.T) {
 		remaining string
 		toggleErr string
 		expiryErr string
+		prompting bool
 		want      string
 	}{
-		{false, "", "", "", "prezilla: presentation mode off"},
-		{true, "", "", "", "prezilla: presentation mode on"},
-		{true, "3 min left", "", "", "prezilla: presentation mode on, 3 min left"},
-		{false, "", "boom", "", "prezilla: presentation mode off (error: boom)"},
-		{true, "1 min left", "boom", "", "prezilla: presentation mode on, 1 min left (error: boom)"},
-		{true, "", "", "expired", "prezilla: presentation mode on (error: expired)"},
-		{true, "", "boom", "expired", "prezilla: presentation mode on (error: boom; expired)"},
+		{false, "", "", "", false, "prezilla: presentation mode off"},
+		{true, "", "", "", false, "prezilla: presentation mode on"},
+		{true, "3 min left", "", "", false, "prezilla: presentation mode on, 3 min left"},
+		{false, "", "boom", "", false, "prezilla: presentation mode off (error: boom)"},
+		{true, "1 min left", "boom", "", false, "prezilla: presentation mode on, 1 min left (error: boom)"},
+		{true, "", "", "expired", false, "prezilla: presentation mode on (error: expired)"},
+		{true, "", "boom", "expired", false, "prezilla: presentation mode on (error: boom; expired)"},
+		{true, "3 min left", "", "", true, "prezilla: presentation mode on, 3 min left\nScreensaver started: continue presenting?"},
+		{true, "3 min left", "boom", "", true, "prezilla: presentation mode on, 3 min left (error: boom)\nScreensaver started: continue presenting?"},
 	}
 	for _, c := range cases {
-		if got := tooltip(c.active, c.remaining, c.toggleErr, c.expiryErr); got != c.want {
+		if got := tooltip(c.active, c.remaining, c.toggleErr, c.expiryErr, c.prompting); got != c.want {
 			t.Errorf("got %q want %q", got, c.want)
 		}
 	}
@@ -186,7 +189,7 @@ func TestAboutAndWebsiteActions(t *testing.T) {
 	if a.text() != "no bus" {
 		t.Errorf("text %q", a.text())
 	}
-	if tip := tooltip(false, "", a.text(), ""); tip != "prezilla: presentation mode off (error: no bus)" {
+	if tip := tooltip(false, "", a.text(), "", false); tip != "prezilla: presentation mode off (error: no bus)" {
 		t.Errorf("tooltip %q", tip)
 	}
 	a.run(context.Background(), websiteAction(o, info), done)
@@ -219,7 +222,7 @@ func TestNilDependenciesYieldErrors(t *testing.T) {
 		if a.text() != c.want {
 			t.Errorf("text %q want %q", a.text(), c.want)
 		}
-		if tip := tooltip(false, "", a.text(), ""); !strings.Contains(tip, "(error: "+c.want+")") {
+		if tip := tooltip(false, "", a.text(), "", false); !strings.Contains(tip, "(error: "+c.want+")") {
 			t.Errorf("tooltip %q", tip)
 		}
 	}

@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `prezilla about` prints version, license and website.
 - Tray menu entries "About prezilla" (desktop notification) and "Project website" (opens the browser via `xdg-open` or `exo-open`).
 - System tray front-end (`prezilla tray`) with an autostart entry.
+- Tray timer entry showing when presentation mode ends and the minutes left.
+- Tray "continue presenting?" prompt when the screensaver starts during a timed session: a sticky critical notification with Continue/End actions, plus matching fallback menu entries in case do-not-disturb hides the notification.
 - Five XFCE switches, each saving the original value and restoring it on `off`:
   desktop icons, notifications, audio mute, minimize windows and wallpaper.
 - Auto-disable timeout (`timeout_minutes`) that turns presentation mode off again.
