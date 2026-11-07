@@ -53,3 +53,21 @@ func TestSwitchesRespectsConfigOrderAndIgnoresUnknown(t *testing.T) {
 		t.Error("expected error for unknown desktop")
 	}
 }
+
+func TestAllSwitchesReturnsEveryKnownSwitchInFixedOrder(t *testing.T) {
+	cfg := core.Config{Switches: []string{core.IDMute}}
+	sws, err := AllSwitches("xfce", &system.FakeRunner{}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, s := range sws {
+		ids = append(ids, s.ID())
+	}
+	if got := strings.Join(ids, ","); got != "icons,notifications,mute,minimize,wallpaper" {
+		t.Errorf("ids = %s", got)
+	}
+	if _, err := AllSwitches("gnome", &system.FakeRunner{}, cfg); err == nil {
+		t.Error("expected error for unknown desktop")
+	}
+}

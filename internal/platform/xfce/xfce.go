@@ -26,3 +26,16 @@ func Switches(r system.Runner, cfg core.Config) []core.Switch {
 	}
 	return out
 }
+
+// All builds every known switch in a fixed order (icons, notifications, mute,
+// minimize, wallpaper). The wallpaper switch uses cfg.Wallpaper; its Disable
+// restores from the saved value and does not need the image.
+func All(r system.Runner, cfg core.Config) []core.Switch {
+	return []core.Switch{
+		NewIcons(r),
+		NewNotifications(r),
+		NewMute(r),
+		NewMinimize(r),
+		NewWallpaper(r, cfg.Wallpaper),
+	}
+}

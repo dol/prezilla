@@ -29,3 +29,13 @@ func Switches(desktop string, r system.Runner, cfg core.Config) ([]core.Switch, 
 	}
 	return nil, fmt.Errorf("unsupported desktop %q", desktop)
 }
+
+// AllSwitches builds every known switch for desktop, used to restore saved
+// entries whose switch is no longer in the config.
+func AllSwitches(desktop string, r system.Runner, cfg core.Config) ([]core.Switch, error) {
+	switch desktop {
+	case "xfce":
+		return xfce.All(r, cfg), nil
+	}
+	return nil, fmt.Errorf("unsupported desktop %q", desktop)
+}

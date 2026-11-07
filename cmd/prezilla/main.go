@@ -35,8 +35,12 @@ func run(ctx context.Context) int {
 		return cli.Run(ctx, args, os.Stdout, os.Stderr, d)
 	}
 
+	cmd := ""
+	if len(args) > 0 {
+		cmd = args[0]
+	}
 	cfg, err := core.LoadConfig(core.DefaultConfigPath())
-	if err != nil {
+	if cfg, err = cli.ResolveConfig(cmd, cfg, err, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -50,7 +54,13 @@ func run(ctx context.Context) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	all, err := platform.AllSwitches(desktop, system.ExecRunner{}, cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	d.Engine = core.NewEngine(switches, core.NewStore(core.DefaultStatePath()), time.Now)
+	d.Engine.SetRestorers(all)
 	d.DefaultTimeout = cfg.Timeout()
 	d.Tray = func(ctx context.Context) error { return tray.Run(ctx, d.Engine, cfg.Timeout()) }
 	return cli.Run(ctx, args, os.Stdout, os.Stderr, d)

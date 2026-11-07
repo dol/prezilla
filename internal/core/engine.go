@@ -11,14 +11,20 @@ import (
 // Engine applies switches in order and restores them in reverse, persisting state.
 // Every read-modify-write holds the Store's cross-process lock.
 type Engine struct {
-	switches []Switch
-	store    *Store
-	now      func() time.Time
+	switches  []Switch
+	restorers []Switch
+	store     *Store
+	now       func() time.Time
 }
 
 func NewEngine(switches []Switch, store *Store, now func() time.Time) *Engine {
 	return &Engine{switches: switches, store: store, now: now}
 }
+
+// SetRestorers registers extra switches that Disable consults only for saved
+// entries whose ID has no configured switch, so a switch removed from the
+// config after "on" is still restored.
+func (e *Engine) SetRestorers(all []Switch) { e.restorers = all }
 
 // Enable turns presentation mode on. timeout <= 0 means no deadline.
 // If already active it only replaces the deadline.
@@ -95,6 +101,22 @@ func (e *Engine) disableLocked(ctx context.Context) error {
 	known := map[string]bool{}
 	for i := len(e.switches) - 1; i >= 0; i-- {
 		sw := e.switches[i]
+		known[sw.ID()] = true
+		saved, ok := st.Saved[sw.ID()]
+		if !ok {
+			continue
+		}
+		if err := sw.Disable(ctx, saved); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", sw.ID(), err))
+			continue
+		}
+		delete(st.Saved, sw.ID())
+	}
+	for i := len(e.restorers) - 1; i >= 0; i-- {
+		sw := e.restorers[i]
+		if known[sw.ID()] {
+			continue
+		}
 		known[sw.ID()] = true
 		saved, ok := st.Saved[sw.ID()]
 		if !ok {

@@ -321,3 +321,51 @@ func TestDisableClearsExpiresAt(t *testing.T) {
 		t.Fatalf("ExpiresAt = %v", st.ExpiresAt)
 	}
 }
+
+func TestDisableUsesRestorerForSavedSwitchNoLongerConfigured(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "state.json"))
+	a1 := &fakeSwitch{id: "a", savedVal: "A"}
+	b1 := &fakeSwitch{id: "b", savedVal: "B"}
+	if err := NewEngine([]Switch{a1, b1}, store, time.Now).Enable(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := store.Load()
+	st.Saved["gone"] = "x"
+	store.Save(st)
+
+	var log []string
+	a2 := &fakeSwitch{id: "a", log: &log}
+	b2 := &fakeSwitch{id: "b", log: &log}
+	unusedA := &fakeSwitch{id: "a", log: &log}
+	e := NewEngine([]Switch{a2}, store, time.Now)
+	e.SetRestorers([]Switch{unusedA, b2})
+	err := e.Disable(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "gone: no configured switch to restore") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(err.Error(), "b:") {
+		t.Fatalf("b reported as orphan: %v", err)
+	}
+	if a2.gotSaved != "A" || b2.disabled != 1 || b2.gotSaved != "B" || unusedA.disabled != 0 {
+		t.Fatalf("a2=%q b2=%d/%q unusedA=%d", a2.gotSaved, b2.disabled, b2.gotSaved, unusedA.disabled)
+	}
+	st, _ = store.Load()
+	if st.Active || len(st.Saved) != 0 {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestRestorerFailureKeepsEntry(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "state.json"))
+	store.Save(State{Active: true, Saved: map[string]string{"b": "B"}})
+	b := &fakeSwitch{id: "b", disableErr: errors.New("nope")}
+	e := NewEngine(nil, store, time.Now)
+	e.SetRestorers([]Switch{b})
+	if err := e.Disable(context.Background()); err == nil || !strings.Contains(err.Error(), "b: nope") {
+		t.Fatalf("err = %v", err)
+	}
+	st, _ := store.Load()
+	if !st.Active || st.Saved["b"] != "B" {
+		t.Fatalf("state = %+v", st)
+	}
+}
