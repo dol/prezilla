@@ -35,9 +35,10 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer, d Deps) int 
 		fmt.Fprintln(out, d.Version)
 		return 0
 	case "on", "toggle":
-		return runEnable(ctx, cmd, rest, errOut, d)
+		return runEnable(context.WithoutCancel(ctx), cmd, rest, errOut, d)
 	case "off":
-		if err := d.Engine.Disable(ctx); err != nil {
+		// Detached like on/toggle: a signal must not abort a half-applied restore.
+		if err := d.Engine.Disable(context.WithoutCancel(ctx)); err != nil {
 			return fail(errOut, err)
 		}
 		return 0
@@ -80,6 +81,8 @@ func fail(errOut io.Writer, err error) int {
 	return 1
 }
 
+// runEnable handles on/toggle. ctx is detached from cancellation by the
+// caller so Ctrl-C cannot kill a switch before its original is saved.
 func runEnable(ctx context.Context, cmd string, args []string, errOut io.Writer, d Deps) int {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

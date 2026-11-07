@@ -28,6 +28,9 @@ func (s wallpaper) set(ctx context.Context, prop, value string) error {
 }
 
 func (s wallpaper) Enable(ctx context.Context) (string, error) {
+	if s.image == "" {
+		return "", errors.New(`wallpaper: no image configured (set "wallpaper" in config)`)
+	}
 	out, err := s.r.Run(ctx, "xfconf-query", "-c", "xfce4-desktop", "-l")
 	if err != nil {
 		return "", fmt.Errorf("xfconf-query -l: %w", err)

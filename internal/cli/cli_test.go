@@ -382,3 +382,38 @@ func TestRunTrayExpiryErrorIsPrintedAndTrayStillRuns(t *testing.T) {
 		t.Errorf("stderr %q", h.errOut.String())
 	}
 }
+
+type ctxSwitch struct {
+	enableErr, disableErr []error
+}
+
+func (c *ctxSwitch) ID() string { return "icons" }
+func (c *ctxSwitch) Enable(ctx context.Context) (string, error) {
+	c.enableErr = append(c.enableErr, ctx.Err())
+	return "orig", nil
+}
+func (c *ctxSwitch) Disable(ctx context.Context, _ string) error {
+	c.disableErr = append(c.disableErr, ctx.Err())
+	return nil
+}
+
+func TestRunEngineCommandsIgnoreParentCancellation(t *testing.T) {
+	h := newHarness(t)
+	sw := &ctxSwitch{}
+	h.d.Engine = core.NewEngine([]core.Switch{sw}, core.NewStore(filepath.Join(t.TempDir(), "state.json")), h.clk.now)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, args := range [][]string{{"on", "--for", "0"}, {"off"}, {"toggle", "--for", "0"}, {"toggle"}} {
+		if c := Run(cancelled, args, &h.out, &h.errOut, h.d); c != 0 {
+			t.Fatalf("%v: code %d: %s", args, c, h.errOut.String())
+		}
+	}
+	if len(sw.enableErr) != 2 || len(sw.disableErr) != 2 {
+		t.Fatalf("enable %v disable %v", sw.enableErr, sw.disableErr)
+	}
+	for _, err := range append(sw.enableErr, sw.disableErr...) {
+		if err != nil {
+			t.Errorf("switch saw cancelled ctx: %v", err)
+		}
+	}
+}

@@ -396,3 +396,14 @@ func TestMuteSinkListFailureStillAttemptsUnmute(t *testing.T) {
 	}
 	has(t, f, "pactl set-sink-mute "+sinkA+" 0")
 }
+
+func TestWallpaperWithoutImageErrorsWithoutTouchingXfconf(t *testing.T) {
+	f := wpFake()
+	_, err := NewWallpaper(f, "").Enable(ctx)
+	if err == nil || err.Error() != `wallpaper: no image configured (set "wallpaper" in config)` {
+		t.Fatalf("got %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
