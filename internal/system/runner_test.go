@@ -2,8 +2,10 @@ package system
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecRunnerTrimsStdout(t *testing.T) {
@@ -64,5 +66,40 @@ func TestFakeRunnerRecordsAndReplays(t *testing.T) {
 		if f.Calls[i] != want[i] {
 			t.Fatalf("Calls[%d] = %q, want %q", i, f.Calls[i], want[i])
 		}
+	}
+}
+
+func TestExecRunnerTimesOutAndNamesCommand(t *testing.T) {
+	start := time.Now()
+	_, err := ExecRunner{Timeout: 100 * time.Millisecond}.Run(context.Background(), "sleep", "5")
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("took %s", d)
+	}
+	if err == nil || !strings.Contains(err.Error(), "sleep") || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err does not wrap DeadlineExceeded: %v", err)
+	}
+}
+
+func TestExecRunnerDefaultTimeoutIsTenSeconds(t *testing.T) {
+	if DefaultTimeout != 10*time.Second {
+		t.Errorf("DefaultTimeout = %s", DefaultTimeout)
+	}
+	if got := (ExecRunner{}).timeout(); got != DefaultTimeout {
+		t.Errorf("zero Timeout resolves to %s", got)
+	}
+	if got := (ExecRunner{Timeout: time.Second}).timeout(); got != time.Second {
+		t.Errorf("explicit Timeout resolves to %s", got)
+	}
+}
+
+func TestExecRunnerParentCancelStillReported(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+	_, err := ExecRunner{Timeout: 5 * time.Second}.Run(ctx, "sleep", "5")
+	if err == nil || strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v", err)
 	}
 }

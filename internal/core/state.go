@@ -26,6 +26,11 @@ type Store struct {
 // defaultLockTimeout bounds how long Lock waits for another process.
 const defaultLockTimeout = 30 * time.Second
 
+// OperationTimeout bounds one whole engine operation (and so how long the
+// state lock is held). It must stay below defaultLockTimeout so a stuck
+// holder is cut off before waiters give up.
+const OperationTimeout = 25 * time.Second
+
 func NewStore(path string) *Store { return &Store{path: path, lockTimeout: defaultLockTimeout} }
 
 // Load returns the zero State if the file does not exist.

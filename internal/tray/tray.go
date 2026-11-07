@@ -80,9 +80,10 @@ func (t *toggler) start(parent context.Context, fn func(ctx context.Context)) bo
 	if !t.busy.TryLock() {
 		return false
 	}
-	ctx := context.WithoutCancel(parent)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), core.OperationTimeout)
 	go func() {
 		defer t.busy.Unlock()
+		defer cancel()
 		fn(ctx)
 	}()
 	return true
@@ -150,7 +151,9 @@ func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, tim
 	var lastExpiryErr string
 
 	refresh := func() {
-		_, expErr := e.DisableIfExpired(ctx)
+		opCtx, opCancel := context.WithTimeout(ctx, core.OperationTimeout)
+		_, expErr := e.DisableIfExpired(opCtx)
+		opCancel()
 		st, err := e.Status()
 		mu.Lock()
 		defer mu.Unlock()

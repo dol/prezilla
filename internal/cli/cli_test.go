@@ -385,11 +385,14 @@ func TestRunTrayExpiryErrorIsPrintedAndTrayStillRuns(t *testing.T) {
 
 type ctxSwitch struct {
 	enableErr, disableErr []error
+	enableDeadline        []time.Time
 }
 
 func (c *ctxSwitch) ID() string { return "icons" }
 func (c *ctxSwitch) Enable(ctx context.Context) (string, error) {
 	c.enableErr = append(c.enableErr, ctx.Err())
+	dl, _ := ctx.Deadline()
+	c.enableDeadline = append(c.enableDeadline, dl)
 	return "orig", nil
 }
 func (c *ctxSwitch) Disable(ctx context.Context, _ string) error {
@@ -415,5 +418,24 @@ func TestRunEngineCommandsIgnoreParentCancellation(t *testing.T) {
 		if err != nil {
 			t.Errorf("switch saw cancelled ctx: %v", err)
 		}
+	}
+}
+
+func TestRunOnBoundsEngineContext(t *testing.T) {
+	h := newHarness(t)
+	sw := &ctxSwitch{}
+	h.d.Engine = core.NewEngine([]core.Switch{sw}, core.NewStore(filepath.Join(t.TempDir(), "state.json")), h.clk.now)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	before := time.Now()
+	if c := Run(cancelled, []string{"on", "--for", "0"}, &h.out, &h.errOut, h.d); c != 0 {
+		t.Fatalf("code %d: %s", c, h.errOut.String())
+	}
+	if len(sw.enableDeadline) != 1 || sw.enableErr[0] != nil {
+		t.Fatalf("deadlines %v errs %v", sw.enableDeadline, sw.enableErr)
+	}
+	dl := sw.enableDeadline[0]
+	if dl.IsZero() || !dl.After(before) || dl.After(time.Now().Add(core.OperationTimeout)) {
+		t.Errorf("deadline %v not within (now, now+%s]", dl, core.OperationTimeout)
 	}
 }

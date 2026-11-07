@@ -60,3 +60,9 @@ func TestStoreSaveCreatesParentDirs(t *testing.T) {
 		t.Fatalf("mode = %v", fi.Mode().Perm())
 	}
 }
+
+func TestOperationTimeoutBelowLockTimeout(t *testing.T) {
+	if OperationTimeout >= defaultLockTimeout {
+		t.Errorf("OperationTimeout %s must be below lock timeout %s", OperationTimeout, defaultLockTimeout)
+	}
+}

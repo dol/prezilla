@@ -95,8 +95,12 @@ func TestTogglerGuardsDetachesAndWaits(t *testing.T) {
 		t.Error("overlapping start accepted")
 	}
 	cancel()
-	if err := (<-got).Err(); err != nil {
+	tctx := <-got
+	if err := tctx.Err(); err != nil {
 		t.Errorf("toggle ctx cancelled with parent: %v", err)
+	}
+	if dl, ok := tctx.Deadline(); !ok || time.Until(dl) <= 0 || time.Until(dl) > core.OperationTimeout {
+		t.Errorf("toggle ctx deadline = %v, %v", dl, ok)
 	}
 	done := make(chan struct{})
 	go func() { tg.wait(); close(done) }()

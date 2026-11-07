@@ -35,10 +35,14 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer, d Deps) int 
 		fmt.Fprintln(out, d.Version)
 		return 0
 	case "on", "toggle":
-		return runEnable(context.WithoutCancel(ctx), cmd, rest, errOut, d)
+		opCtx, cancel := detachedOp(ctx)
+		defer cancel()
+		return runEnable(opCtx, cmd, rest, errOut, d)
 	case "off":
 		// Detached like on/toggle: a signal must not abort a half-applied restore.
-		if err := d.Engine.Disable(context.WithoutCancel(ctx)); err != nil {
+		opCtx, cancel := detachedOp(ctx)
+		defer cancel()
+		if err := d.Engine.Disable(opCtx); err != nil {
 			return fail(errOut, err)
 		}
 		return 0
@@ -57,11 +61,24 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer, d Deps) int 
 	return 2
 }
 
+// detachedOp returns a context that ignores cancellation of ctx but is
+// bounded by core.OperationTimeout, so a hung tool cannot hold the state lock.
+func detachedOp(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), core.OperationTimeout)
+}
+
+// disableIfExpired runs DisableIfExpired bounded by core.OperationTimeout.
+func disableIfExpired(ctx context.Context, d Deps) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, core.OperationTimeout)
+	defer cancel()
+	return d.Engine.DisableIfExpired(ctx)
+}
+
 // prepareTray enforces the deadline before the tray starts, so a login-time
 // start restores an expired session and keeps watching a live one even when
 // the tray then exits for lack of a host. Errors are reported, not fatal.
 func prepareTray(ctx context.Context, errOut io.Writer, d Deps) {
-	if _, err := d.Engine.DisableIfExpired(ctx); err != nil {
+	if _, err := disableIfExpired(ctx, d); err != nil {
 		fmt.Fprintln(errOut, err)
 	}
 	st, err := d.Engine.Status()
@@ -127,7 +144,7 @@ func runEnable(ctx context.Context, cmd string, args []string, errOut io.Writer,
 }
 
 func runStatus(ctx context.Context, out, errOut io.Writer, d Deps) int {
-	if _, err := d.Engine.DisableIfExpired(ctx); err != nil {
+	if _, err := disableIfExpired(ctx, d); err != nil {
 		return fail(errOut, err)
 	}
 	st, err := d.Engine.Status()
@@ -156,7 +173,7 @@ func runWatch(ctx context.Context, errOut io.Writer, d Deps) int {
 		if !st.Active {
 			return 0
 		}
-		if _, err := d.Engine.DisableIfExpired(ctx); err != nil {
+		if _, err := disableIfExpired(ctx, d); err != nil {
 			fmt.Fprintln(errOut, err)
 		}
 		select {

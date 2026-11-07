@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - GitHub Actions CI and release workflows.
 
 ### Fixed
+- External commands time out after 10 s and engine operations after 25 s, so a hung `pactl`/`xfconf-query`/`wmctrl` can no longer hold the state lock and block `off`, the watcher and the tray.
 - Concurrent `prezilla` processes (tray, CLI, watcher) serialize on a state lock, so originals can no longer be lost; the state file is fsynced on save.
 - `off` restores switches removed from the config since `on`, and `off`/`status`/`tray` fall back to the default config when `config.json` is broken.
 - The auto-off deadline is enforced for sessions started from the tray and when the tray starts at login.
