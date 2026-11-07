@@ -3,6 +3,8 @@ package system
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,5 +92,27 @@ func TestFakeOpenerRecords(t *testing.T) {
 	_ = f.Open(context.Background(), "https://a")
 	if len(f.Calls) != 1 || f.Calls[0] != "https://a" {
 		t.Errorf("%v", f.Calls)
+	}
+}
+
+func TestExecOpenerWaitDelayIsSuccess(t *testing.T) {
+	r := &FakeRunner{Err: map[string]error{
+		"xdg-open https://x.org": fmt.Errorf("xdg-open: %w", exec.ErrWaitDelay),
+	}}
+	if err := (ExecOpener{Runner: r}).Open(context.Background(), "https://x.org"); err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if len(r.Calls) != 1 || r.Calls[0] != "xdg-open https://x.org" {
+		t.Errorf("calls %v, want only xdg-open", r.Calls)
+	}
+}
+
+func TestExecOpenerExoWaitDelayIsSuccess(t *testing.T) {
+	r := &FakeRunner{Err: map[string]error{
+		"xdg-open https://x.org": errors.New("not found"),
+		"exo-open https://x.org": fmt.Errorf("exo-open: %w", exec.ErrWaitDelay),
+	}}
+	if err := (ExecOpener{Runner: r}).Open(context.Background(), "https://x.org"); err != nil {
+		t.Fatalf("err = %v, want nil", err)
 	}
 }

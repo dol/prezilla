@@ -3,6 +3,7 @@ package system
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -101,5 +102,16 @@ func TestExecRunnerParentCancelStillReported(t *testing.T) {
 	_, err := ExecRunner{Timeout: 5 * time.Second}.Run(ctx, "sleep", "5")
 	if err == nil || strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestExecRunnerLingeringGrandchildYieldsErrWaitDelay(t *testing.T) {
+	start := time.Now()
+	_, err := ExecRunner{Timeout: 5 * time.Second}.Run(context.Background(), "sh", "-c", "sleep 3 & exit 0")
+	if !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("err = %v, want ErrWaitDelay", err)
+	}
+	if d := time.Since(start); d > 4*time.Second {
+		t.Errorf("took %v", d)
 	}
 }
