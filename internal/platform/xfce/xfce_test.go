@@ -3,6 +3,7 @@ package xfce
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -83,26 +84,109 @@ func TestNotificationsUnreadableDefaultsToFalse(t *testing.T) {
 	}
 }
 
-const muteGet = "env LC_ALL=C pactl get-sink-mute @DEFAULT_SINK@"
+const (
+	muteDefault = "env LC_ALL=C pactl get-default-sink"
+	muteGet     = "env LC_ALL=C pactl get-sink-mute @DEFAULT_SINK@"
+	muteList    = "pactl list short sinks"
+	sinkA       = "alsa_output.pci-0000_00_1f.3.analog-stereo"
+	sinkB       = "alsa_output.usb-headset.analog-stereo"
+)
+
+func muteGetFor(sink string) string { return "env LC_ALL=C pactl get-sink-mute " + sink }
+
+func sinkList(names ...string) string {
+	var lines []string
+	for i, n := range names {
+		lines = append(lines, fmt.Sprintf("%d\t%s\tmodule-alsa-card.c\ts16le 2ch 48000Hz\tSUSPENDED", i+1, n))
+	}
+	return strings.Join(lines, "\n")
+}
 
 func TestMuteAlreadyMutedStaysMuted(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{muteGet: "Mute: yes"}}
+	f := &system.FakeRunner{Out: map[string]string{muteDefault: sinkA, muteGetFor(sinkA): "Mute: yes"}}
 	sw := NewMute(f)
 	saved, err := sw.Enable(ctx)
-	if err != nil || saved != "yes" {
+	if err != nil || saved != sinkA+"\tyes" {
 		t.Fatalf("got (%q, %v)", saved, err)
 	}
+	n := len(f.Calls)
 	if err := sw.Disable(ctx, saved); err != nil {
 		t.Fatal(err)
 	}
-	lacks(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 0")
+	if len(f.Calls) != n {
+		t.Fatalf("Disable issued calls %v", f.Calls[n:])
+	}
 }
 
 func TestMuteRestoresUnmuted(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{muteGet: "Mute: no"}}
+	f := &system.FakeRunner{Out: map[string]string{muteDefault: sinkA, muteGetFor(sinkA): "Mute: no", muteList: sinkList(sinkA)}}
 	sw := NewMute(f)
 	saved, err := sw.Enable(ctx)
-	if err != nil || saved != "no" {
+	if err != nil || saved != sinkA+"\tno" {
+		t.Fatalf("got (%q, %v)", saved, err)
+	}
+	has(t, f, "pactl set-sink-mute "+sinkA+" 1")
+	if err := sw.Disable(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, "pactl set-sink-mute "+sinkA+" 0")
+}
+
+func TestMuteRestoresOriginalSinkAfterDefaultChanged(t *testing.T) {
+	f := &system.FakeRunner{Out: map[string]string{muteDefault: sinkA, muteGetFor(sinkA): "Mute: no"}}
+	sw := NewMute(f)
+	saved, err := sw.Enable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Out[muteDefault] = sinkB // headset plugged in: default moved
+	f.Out[muteList] = sinkList(sinkA, sinkB)
+	if err := sw.Disable(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, "pactl set-sink-mute "+sinkA+" 0")
+	lacks(t, f, "pactl set-sink-mute "+sinkB+" 0")
+	lacks(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 0")
+}
+
+func TestMuteVanishedSinkIsNotRestored(t *testing.T) {
+	// sinkA.monitor and a prefix of sinkA must not count as sinkA.
+	f := &system.FakeRunner{Out: map[string]string{muteList: sinkList(sinkB, sinkA+".monitor", "alsa_output")}}
+	if err := NewMute(f).Disable(ctx, sinkA+"\tno"); err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, muteList)
+	for _, c := range f.Calls {
+		if strings.HasPrefix(c, "pactl set-sink-mute") {
+			t.Fatalf("unexpected set call %q", c)
+		}
+	}
+}
+
+func TestMuteLegacySavedValues(t *testing.T) {
+	f := &system.FakeRunner{}
+	if err := NewMute(f).Disable(ctx, "no"); err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 0")
+	lacks(t, f, muteList)
+	f = &system.FakeRunner{}
+	if err := NewMute(f).Disable(ctx, "yes"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMuteDefaultSinkLookupFailureFallsBackToAlias(t *testing.T) {
+	f := &system.FakeRunner{
+		Out: map[string]string{muteGet: "Mute: no"},
+		Err: map[string]error{muteDefault: errors.New("too old")},
+	}
+	sw := NewMute(f)
+	saved, err := sw.Enable(ctx)
+	if err != nil || saved != "@DEFAULT_SINK@\tno" {
 		t.Fatalf("got (%q, %v)", saved, err)
 	}
 	has(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 1")
@@ -110,23 +194,36 @@ func TestMuteRestoresUnmuted(t *testing.T) {
 		t.Fatal(err)
 	}
 	has(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 0")
+	lacks(t, f, muteList)
+}
+
+func TestMuteEmptyDefaultSinkFallsBackToAlias(t *testing.T) {
+	f := &system.FakeRunner{Out: map[string]string{muteDefault: "  ", muteGet: "Mute: yes"}}
+	saved, err := NewMute(f).Enable(ctx)
+	if err != nil || saved != "@DEFAULT_SINK@\tyes" {
+		t.Fatalf("got (%q, %v)", saved, err)
+	}
 }
 
 func TestMuteReadFailureErrorMentionsPactl(t *testing.T) {
-	f := &system.FakeRunner{Err: map[string]error{muteGet: errors.New("not found")}}
+	f := &system.FakeRunner{
+		Out: map[string]string{muteDefault: sinkA},
+		Err: map[string]error{muteGetFor(sinkA): errors.New("not found")},
+	}
 	_, err := NewMute(f).Enable(ctx)
 	if err == nil || !strings.Contains(err.Error(), "pactl") {
 		t.Fatalf("got %v", err)
 	}
+	lacks(t, f, "pactl set-sink-mute "+sinkA+" 1")
 }
 
 func TestMuteLocalizedOutputFailsClosed(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{muteGet: "Stumm: ja"}}
+	f := &system.FakeRunner{Out: map[string]string{muteDefault: sinkA, muteGetFor(sinkA): "Stumm: ja"}}
 	_, err := NewMute(f).Enable(ctx)
 	if err == nil || !strings.Contains(err.Error(), "pactl get-sink-mute") {
 		t.Fatalf("got %v", err)
 	}
-	lacks(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 1")
+	lacks(t, f, "pactl set-sink-mute "+sinkA+" 1")
 }
 
 func TestMuteEmptyOutputFailsClosed(t *testing.T) {
@@ -290,4 +387,12 @@ func TestWallpaperEmptyOriginalIsSkipped(t *testing.T) {
 			t.Fatalf("empty prop was set: %q", c)
 		}
 	}
+}
+
+func TestMuteSinkListFailureStillAttemptsUnmute(t *testing.T) {
+	f := &system.FakeRunner{Err: map[string]error{muteList: errors.New("no server")}}
+	if err := NewMute(f).Disable(ctx, sinkA+"\tno"); err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, "pactl set-sink-mute "+sinkA+" 0")
 }
