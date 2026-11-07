@@ -170,21 +170,40 @@ func (g *clickGate) open() bool {
 	return g.last.IsZero() || g.now().Sub(g.last) >= toggleCooldown
 }
 
+// toggleOutcome says what tryToggleOutcome did with a click.
+type toggleOutcome int
+
+const (
+	outcomeStarted toggleOutcome = iota // fn was started
+	outcomeCooling                      // dropped by the cooldown
+	outcomeBusy                         // a toggle is still running
+)
+
+// needsRefresh reports whether a refused click must re-send the state at
+// once. A busy click does not: the running toggle refreshes when it ends, and
+// a refresh now would block the menu loop on the engine lock.
+func (o toggleOutcome) needsRefresh() bool { return o == outcomeCooling }
+
 // tryToggle starts fn on tg unless the cooldown is running or a toggle is
 // already running; an accepted toggle starts the cooldown whatever its
 // result. It reports whether fn was started.
 func tryToggle(ctx context.Context, g *clickGate, tg *toggler, fn func(context.Context)) bool {
+	return tryToggleOutcome(ctx, g, tg, fn) == outcomeStarted
+}
+
+// tryToggleOutcome is tryToggle with the reason for a refusal.
+func tryToggleOutcome(ctx context.Context, g *clickGate, tg *toggler, fn func(context.Context)) toggleOutcome {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := g.now()
 	if !g.last.IsZero() && now.Sub(g.last) < toggleCooldown {
-		return false
+		return outcomeCooling
 	}
 	if !tg.start(ctx, fn) {
-		return false
+		return outcomeBusy
 	}
 	g.last = now
-	return true
+	return outcomeStarted
 }
 
 // startExtend runs one Engine.Extend call for the Reset timer item on xt, detached from ctx's cancellation
@@ -615,7 +634,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	// The cooldown applies here and in requestToggle, never to Reset timer
 	// or the question items.
 	toggle := func() {
-		if !tryToggle(ctx, gate, tg, func(tctx context.Context) {
+		if out := tryToggleOutcome(ctx, gate, tg, func(tctx context.Context) {
 			_, err := e.Toggle(tctx, timeout)
 			if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
 				err = errors.Join(err, serr)
@@ -627,8 +646,8 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 				fmt.Fprintln(os.Stderr, usererr.Explain(err))
 			}
 			refresh()
-		}) {
-			refresh() // cooldown or a toggle still running: re-send the real state
+		}); out.needsRefresh() {
+			refresh() // dropped by the cooldown (lock free): re-send the real state
 		}
 	}
 

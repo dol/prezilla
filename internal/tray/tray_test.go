@@ -827,3 +827,36 @@ func TestErrorTextsJoinWithoutDoubledPunctuation(t *testing.T) {
 		t.Errorf("tooltip %q", tip)
 	}
 }
+
+// Only a click dropped by the cooldown needs an immediate refresh; a click
+// refused because a toggle is still running is covered by that toggle's own
+// final refresh (and refresh would block on the engine lock).
+func TestTryToggleOutcomeSaysWhyItWasRefused(t *testing.T) {
+	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	g := &clickGate{now: clk.now}
+	var tg toggler
+	release := make(chan struct{})
+	started := make(chan struct{})
+	fn := func(context.Context) { close(started); <-release }
+	if got := tryToggleOutcome(context.Background(), g, &tg, fn); got != outcomeStarted {
+		t.Fatalf("first: %v", got)
+	}
+	<-started
+	clk.add(100 * time.Millisecond)
+	if got := tryToggleOutcome(context.Background(), g, &tg, fn); got != outcomeCooling {
+		t.Errorf("within cooldown: %v", got)
+	}
+	clk.add(time.Second)
+	if got := tryToggleOutcome(context.Background(), g, &tg, fn); got != outcomeBusy {
+		t.Errorf("after cooldown while running: %v", got)
+	}
+	close(release)
+	tg.wait()
+	if got := tryToggleOutcome(context.Background(), g, &tg, func(context.Context) {}); got != outcomeStarted {
+		t.Errorf("idle after cooldown: %v", got)
+	}
+	tg.wait()
+	if outcomeCooling.needsRefresh() != true || outcomeBusy.needsRefresh() || outcomeStarted.needsRefresh() {
+		t.Error("only a cooldown drop needs a refresh")
+	}
+}
