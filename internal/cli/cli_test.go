@@ -187,6 +187,22 @@ func TestRunMappedEngineErrorPrintsExplainedText(t *testing.T) {
 	}
 }
 
+func TestRunOnWithoutSwitchesExplainsAndExits1(t *testing.T) {
+	h := newHarness(t)
+	h.d.Engine = core.NewEngine(nil, core.NewStore(filepath.Join(t.TempDir(), "state.json")), h.clk.now)
+	if c := h.run("on"); c != 1 {
+		t.Errorf("code %d", c)
+	}
+	want := `No switch is ticked, so presentation mode would change nothing. Tick at least one switch in the tray menu, or add one to "switches" in config.json.` +
+		" (details: no switches configured)\n"
+	if got := h.errOut.String(); got != want {
+		t.Errorf("stderr %q\nwant %q", got, want)
+	}
+	if h.spawned != 0 {
+		t.Errorf("watcher spawned %d times", h.spawned)
+	}
+}
+
 func TestRunTrayCallsDepsTray(t *testing.T) {
 	h := newHarness(t)
 	if c := h.run("tray"); c != 0 || h.tray != 1 {

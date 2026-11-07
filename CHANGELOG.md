@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - Tray: a tick box per switch (Hide desktop icons, Disable notifications, Keep screen awake, Mute sound, Minimize windows, Change wallpaper). Changes apply at once, also while presentation mode is on, and are saved to `config.json`; unknown keys in the file are kept.
 - Tray: "Choose wallpaper…" picks the wallpaper image with a `zenity` file chooser (without `zenity`, a notification explains how to set `wallpaper` in `config.json`). Choosing an image while presenting applies it at once.
-- Error sentences for a wallpaper image that no longer exists and for a `config.json` that cannot be saved.
+- Error sentences for a wallpaper image that no longer exists, a chosen file that is missing or not an image, a file chooser that cannot start, a `config.json` that cannot be saved, and turning presentation mode on with no switch ticked (which now fails with that sentence instead of doing nothing).
 - Tray: without `zenity` (or when it cannot start), About Prezilla shows a built-in X11 window with the project link and a Close button, drawn with embedded fonts (no new runtime dependency); the notification is now the last fallback, used only when there is no X display.
 - `presentation` switch (on by default, after `notifications`): turns on `xfce4-power-manager`'s presentation mode, which also keeps the screensaver and screen blanking off, and restores the previous value (or removes the setting) on `off`. It needs `xfce4-power-manager` to be running.
 - Tray: the Quit item reads "Quit (presentation stays on)" while presentation mode is on, and "Quit" otherwise.

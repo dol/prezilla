@@ -12,6 +12,7 @@ import (
 	"github.com/godbus/dbus/v5"
 
 	"prezilla/internal/core"
+	"prezilla/internal/system"
 )
 
 const (
@@ -98,11 +99,11 @@ func cases() []struct {
 		{"wallpaper image gone", errors.New("wallpaper: wallpaper: image not found: /home/u/Pictures/pres.png"),
 			`Couldn't change the wallpaper: the image /home/u/Pictures/pres.png no longer exists. Choose another image from the tray menu, or fix "wallpaper" in config.json.`},
 		{"config save", fmt.Errorf("write config %s: %w", "/home/u/.config/prezilla/config.json", errors.New("no space left on device")),
-			`Couldn't save your choice to /home/u/.config/prezilla/config.json. It stays in effect until presentation mode ends, then the saved setting applies again.`},
+			`Couldn't save your choice to /home/u/.config/prezilla/config.json. Check that the folder is writable, then try again.`},
 		{"config dir cannot be created", fmt.Errorf("create config dir %s: %w", "/home/u/.config/prezilla", errors.New("permission denied")),
-			`Couldn't save your choice to /home/u/.config/prezilla/config.json. It stays in effect until presentation mode ends, then the saved setting applies again.`},
+			`Couldn't save your choice to /home/u/.config/prezilla/config.json. Check that the folder is writable, then try again.`},
 		{"config save wrapped", fmt.Errorf("save config %s: %w", "/c/config.json", errors.New("read-only file system")),
-			`Couldn't save your choice to /c/config.json. It stays in effect until presentation mode ends, then the saved setting applies again.`},
+			`Couldn't save your choice to /c/config.json. Check that the folder is writable, then try again.`},
 		{"lock", lock, sLock},
 		{"parse state", errors.New("parse state /home/u/.local/state/prezilla/state.json: invalid character 'x' looking for beginning of value"),
 			"Prezilla's saved state (/home/u/.local/state/prezilla/state.json) is unreadable, so it can't restore your settings automatically. Turn desktop icons, notifications, sound and windows back on and set your wallpaper again by hand (the old wallpaper path may still be readable in that file), then delete that file."},
@@ -110,6 +111,41 @@ func cases() []struct {
 			"The configuration file (/home/u/.config/prezilla/config.json) isn't valid JSON. Fix it, or delete it to use the defaults."},
 		{"unsupported desktop", errors.New(`unsupported desktop "GNOME"`),
 			`Prezilla supports XFCE only (this session reports "GNOME"). Run it inside an XFCE session.`},
+		// The shape system.ZenityChooser returns: two %w, one error.
+		{"chooser could not start", fmt.Errorf("file chooser: %w: %w", errors.New("zenity could not start its window"), errors.New("exit status 1")),
+			`Couldn't open the file chooser: zenity could not start its window. Check that your desktop session is running, or set "wallpaper" in config.json.`},
+		{"no switch ticked", fmt.Errorf("toggle: %w", core.ErrNoSwitches),
+			`No switch is ticked, so presentation mode would change nothing. Tick at least one switch in the tray menu, or add one to "switches" in config.json.`},
+	}
+}
+
+// The wallpaper sentences must match what system.ValidateImage really returns.
+func TestChosenImageErrorsMatchValidateImage(t *testing.T) {
+	dir := t.TempDir()
+	notImage := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(notImage, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "gone.png")
+	for _, c := range []struct {
+		name, path, want string
+	}{
+		{"not an image", notImage, "Couldn't use " + notImage + " as the wallpaper: it isn't an image file (png, jpg, jpeg, webp, bmp, gif, tif, tiff or svg). Choose another image."},
+		{"missing", missing, "Couldn't use " + missing + " as the wallpaper: the file doesn't exist. Choose another image."},
+		{"directory", dir, "Couldn't use " + dir + " as the wallpaper: the file doesn't exist. Choose another image."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := system.ValidateImage(c.path)
+			if err == nil {
+				t.Fatal("ValidateImage accepted it")
+			}
+			if got := Short(err); got != c.want {
+				t.Errorf("Short = %q\nwant %q", got, c.want)
+			}
+			if got, want := Explain(err), c.want+" (details: "+err.Error()+")"; got != want {
+				t.Errorf("Explain = %q\nwant %q", got, want)
+			}
+		})
 	}
 }
 
@@ -266,7 +302,7 @@ func TestConfigSaveMatchesRealUpdateConfigError(t *testing.T) {
 	if err == nil {
 		t.Skip("UpdateConfig did not fail here")
 	}
-	want := "Couldn't save your choice to " + path + ". It stays in effect until presentation mode ends, then the saved setting applies again."
+	want := "Couldn't save your choice to " + path + ". Check that the folder is writable, then try again."
 	if got := Short(err); got != want {
 		t.Errorf("Short = %q\nwant %q\n(raw error: %v)", got, want, err)
 	}
@@ -284,8 +320,18 @@ func TestConfigDirCreateFailureMatchesRealUpdateConfigError(t *testing.T) {
 	if err == nil {
 		t.Skip("UpdateConfig did not fail here")
 	}
-	want := "Couldn't save your choice to " + path + ". It stays in effect until presentation mode ends, then the saved setting applies again."
+	want := "Couldn't save your choice to " + path + ". Check that the folder is writable, then try again."
 	if got := Short(err); got != want {
 		t.Errorf("Short = %q\nwant %q\n(raw error: %v)", got, want, err)
+	}
+}
+
+func TestMultiWrapErrorIsOneErrorButJoinIsSplit(t *testing.T) {
+	a, b := errors.New("a"), errors.New("b")
+	if got := leaves(fmt.Errorf("x: %w: %w", a, b)); len(got) != 1 {
+		t.Errorf("multi-%%w split into %d", len(got))
+	}
+	if got := leaves(errors.Join(a, fmt.Errorf("x: %w: %w", a, b))); len(got) != 2 {
+		t.Errorf("join gave %d leaves, want 2", len(got))
 	}
 }

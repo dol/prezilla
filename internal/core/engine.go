@@ -41,6 +41,10 @@ func (e *Engine) configured() []Switch {
 	return e.switches
 }
 
+// ErrNoSwitches means presentation mode cannot turn on because no switch is
+// configured; nothing is changed or saved.
+var ErrNoSwitches = errors.New("no switches configured")
+
 // Enable turns presentation mode on. timeout <= 0 means no deadline.
 // If already active it only replaces the deadline.
 func (e *Engine) Enable(ctx context.Context, timeout time.Duration) error {
@@ -64,6 +68,9 @@ func (e *Engine) enableLocked(ctx context.Context, timeout time.Duration) error 
 	}
 	if st.Active {
 		return e.store.Save(st)
+	}
+	if len(switches) == 0 {
+		return ErrNoSwitches
 	}
 	if st.Saved == nil {
 		st.Saved = map[string]string{}

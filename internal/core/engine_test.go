@@ -574,3 +574,28 @@ func TestSetSwitchesChangesNextEnable(t *testing.T) {
 		t.Fatalf("a=%d b=%d", a.enabled, b.enabled)
 	}
 }
+
+func TestEnableWithoutSwitchesReturnsErrNoSwitchesAndSavesNothing(t *testing.T) {
+	e, store, _ := newTestEngine(t)
+	if err := e.Enable(context.Background(), time.Hour); !errors.Is(err, ErrNoSwitches) {
+		t.Fatalf("err = %v, want ErrNoSwitches", err)
+	}
+	if _, err := os.Stat(store.path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("state file written (stat err %v)", err)
+	}
+	if _, err := e.Toggle(context.Background(), time.Hour); !errors.Is(err, ErrNoSwitches) {
+		t.Fatalf("Toggle err = %v, want ErrNoSwitches", err)
+	}
+}
+
+func TestEnableWithoutSwitchesWhileActiveOnlyMovesDeadline(t *testing.T) {
+	e, store, c := newTestEngine(t)
+	activate(t, store, map[string]string{"a": "1"}, time.Time{})
+	if err := e.Enable(context.Background(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := store.Load()
+	if !st.Active || !st.ExpiresAt.Equal(c.now().Add(time.Hour)) {
+		t.Fatalf("state = %+v", st)
+	}
+}

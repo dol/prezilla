@@ -9,11 +9,15 @@ package usererr
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/godbus/dbus/v5"
+
+	"prezilla/internal/core"
+	"prezilla/internal/system"
 )
 
 // rule is one row of the matcher table. match inspects one (non-joined)
@@ -52,7 +56,23 @@ var (
 	unsupportedRE     = regexp.MustCompile(`(?:^|: )unsupported desktop "([^"]*)"`)
 )
 
-const saveConfigSentence = "Couldn't save your choice to %s. It stays in effect until presentation mode ends, then the saved setting applies again."
+const saveConfigSentence = "Couldn't save your choice to %s. Check that the folder is writable, then try again."
+
+// chosenImagePath returns the path a system.ValidateImage error names: the
+// stat error's own path, else the text after the sentinel's "<sentinel>: "
+// (minus " is not a regular file").
+func chosenImagePath(err error, text string, sentinel error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Path
+	}
+	prefix := sentinel.Error() + ": "
+	i := strings.Index(text, prefix)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimSuffix(text[i+len(prefix):], " is not a regular file")
+}
 
 // hasSwitchPrefix reports whether text starts with "<id>: ".
 func hasSwitchPrefix(text, id string) bool { return strings.HasPrefix(text, id+": ") }
@@ -217,6 +237,33 @@ var rules = []rule{
 		}
 		return "", false
 	}},
+	{"chosen file is not an image", func(err error, text string) (string, bool) {
+		if errors.Is(err, system.ErrNotImage) {
+			return fmt.Sprintf("Couldn't use %s as the wallpaper: it isn't an image file (png, jpg, jpeg, webp, bmp, gif, tif, tiff or svg). Choose another image.",
+				chosenImagePath(err, text, system.ErrNotImage)), true
+		}
+		return "", false
+	}},
+	{"chosen file missing", func(err error, text string) (string, bool) {
+		if errors.Is(err, system.ErrImageMissing) {
+			return fmt.Sprintf("Couldn't use %s as the wallpaper: the file doesn't exist. Choose another image.",
+				chosenImagePath(err, text, system.ErrImageMissing)), true
+		}
+		return "", false
+	}},
+	{"file chooser could not start", func(_ error, text string) (string, bool) {
+		// The sentinel is unexported in system, so match its text.
+		if strings.Contains(text, "file chooser: zenity could not start its window") {
+			return `Couldn't open the file chooser: zenity could not start its window. Check that your desktop session is running, or set "wallpaper" in config.json.`, true
+		}
+		return "", false
+	}},
+	{"no switch ticked", func(err error, _ string) (string, bool) {
+		if errors.Is(err, core.ErrNoSwitches) {
+			return `No switch is ticked, so presentation mode would change nothing. Tick at least one switch in the tray menu, or add one to "switches" in config.json.`, true
+		}
+		return "", false
+	}},
 	{"config cannot be saved", func(_ error, text string) (string, bool) {
 		if m := createConfigDirRE.FindStringSubmatch(text); m != nil {
 			return fmt.Sprintf(saveConfigSentence, filepath.Join(m[1], "config.json")), true
@@ -257,19 +304,30 @@ var rules = []rule{
 	}},
 }
 
-// leaves flattens errors.Join trees (anything with Unwrap() []error) into the
-// individual errors, in order.
+// leaves flattens errors.Join trees into the individual errors, in order.
+// Only a join is split (its text is its parts' texts, one per line); an
+// fmt.Errorf with several %w is one error with its own text and stays whole.
 func leaves(err error) []error {
-	if j, ok := err.(interface{ Unwrap() []error }); ok {
-		var out []error
-		for _, e := range j.Unwrap() {
-			if e != nil {
-				out = append(out, leaves(e)...)
-			}
-		}
-		return out
+	j, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return []error{err}
 	}
-	return []error{err}
+	var parts []error
+	var texts []string
+	for _, e := range j.Unwrap() {
+		if e != nil {
+			parts = append(parts, e)
+			texts = append(texts, e.Error())
+		}
+	}
+	if err.Error() != strings.Join(texts, "\n") {
+		return []error{err}
+	}
+	var out []error
+	for _, e := range parts {
+		out = append(out, leaves(e)...)
+	}
+	return out
 }
 
 // sentence returns the plain sentence for one error, if a rule matches.
