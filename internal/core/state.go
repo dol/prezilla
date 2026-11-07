@@ -19,10 +19,14 @@ type State struct {
 
 // Store persists State as JSON at a path.
 type Store struct {
-	path string
+	path        string
+	lockTimeout time.Duration // how long Lock waits for another holder
 }
 
-func NewStore(path string) *Store { return &Store{path: path} }
+// defaultLockTimeout bounds how long Lock waits for another process.
+const defaultLockTimeout = 30 * time.Second
+
+func NewStore(path string) *Store { return &Store{path: path, lockTimeout: defaultLockTimeout} }
 
 // Load returns the zero State if the file does not exist.
 func (s *Store) Load() (State, error) {

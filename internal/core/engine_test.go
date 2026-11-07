@@ -168,7 +168,14 @@ func TestDisableUnknownSwitchIDIsDroppedAndReported(t *testing.T) {
 func TestEnableSaveFailureRollsBackSwitches(t *testing.T) {
 	dir := t.TempDir()
 	ro := filepath.Join(dir, "ro")
-	if err := os.Mkdir(ro, 0o500); err != nil {
+	if err := os.Mkdir(ro, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The lock file must exist beforehand so only Save fails in the read-only dir.
+	if err := os.WriteFile(filepath.Join(ro, "state.json.lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ro, 0o500); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(ro, 0o700) })

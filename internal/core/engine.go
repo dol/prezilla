@@ -9,6 +9,7 @@ import (
 )
 
 // Engine applies switches in order and restores them in reverse, persisting state.
+// Every read-modify-write holds the Store's cross-process lock.
 type Engine struct {
 	switches []Switch
 	store    *Store
@@ -22,6 +23,15 @@ func NewEngine(switches []Switch, store *Store, now func() time.Time) *Engine {
 // Enable turns presentation mode on. timeout <= 0 means no deadline.
 // If already active it only replaces the deadline.
 func (e *Engine) Enable(ctx context.Context, timeout time.Duration) error {
+	unlock, err := e.store.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return e.enableLocked(ctx, timeout)
+}
+
+func (e *Engine) enableLocked(ctx context.Context, timeout time.Duration) error {
 	st, err := e.store.Load()
 	if err != nil {
 		return err
@@ -65,6 +75,15 @@ func (e *Engine) Enable(ctx context.Context, timeout time.Duration) error {
 
 // Disable restores all saved switches in reverse order. No-op when inactive.
 func (e *Engine) Disable(ctx context.Context) error {
+	unlock, err := e.store.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return e.disableLocked(ctx)
+}
+
+func (e *Engine) disableLocked(ctx context.Context) error {
 	st, err := e.store.Load()
 	if err != nil {
 		return err
@@ -110,14 +129,19 @@ func (e *Engine) Disable(ctx context.Context) error {
 
 // Toggle flips the mode and reports whether it is now active.
 func (e *Engine) Toggle(ctx context.Context, timeout time.Duration) (bool, error) {
+	unlock, err := e.store.Lock()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
 	st, err := e.store.Load()
 	if err != nil {
 		return false, err
 	}
 	if st.Active {
-		err = e.Disable(ctx)
+		err = e.disableLocked(ctx)
 	} else {
-		err = e.Enable(ctx, timeout)
+		err = e.enableLocked(ctx, timeout)
 	}
 	after, lerr := e.store.Load()
 	if lerr != nil {
@@ -128,6 +152,11 @@ func (e *Engine) Toggle(ctx context.Context, timeout time.Duration) (bool, error
 
 // DisableIfExpired disables when active and the deadline has passed.
 func (e *Engine) DisableIfExpired(ctx context.Context) (bool, error) {
+	unlock, err := e.store.Lock()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
 	st, err := e.store.Load()
 	if err != nil {
 		return false, err
@@ -135,7 +164,9 @@ func (e *Engine) DisableIfExpired(ctx context.Context) (bool, error) {
 	if !st.Active || st.ExpiresAt.IsZero() || e.now().Before(st.ExpiresAt) {
 		return false, nil
 	}
-	return true, e.Disable(ctx)
+	return true, e.disableLocked(ctx)
 }
 
+// Status reads the state without locking; Save's atomic rename means it
+// always sees a whole file.
 func (e *Engine) Status() (State, error) { return e.store.Load() }
