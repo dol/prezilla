@@ -1,10 +1,13 @@
 package system
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +31,10 @@ var ErrNoZenity = errors.New("about: zenity not found")
 // closes it.
 type ZenityAbout struct {
 	Runner Runner
+	// IconFile is an absolute path to the logo. zenity 4 otherwise looks the
+	// icon up by name in the icon theme, which has no entry until the
+	// application is installed. Empty means use the name.
+	IconFile string
 }
 
 // zenityStartFailure reports whether an exit-1 error means zenity never
@@ -65,7 +72,7 @@ func (z ZenityAbout) Show(ctx context.Context, info about.Info) error {
 		}
 		return fmt.Errorf("about: zenity --version: %w", err)
 	}
-	_, err = z.Runner.Run(ctx, "zenity", zenityArgs(zenityMajor(ver), info)...)
+	_, err = z.Runner.Run(ctx, "zenity", zenityArgs(zenityMajor(ver), info, z.IconFile)...)
 	if err != nil {
 		var ec interface{ ExitCode() int }
 		switch {
@@ -134,10 +141,13 @@ func zenityMajor(out string) int {
 
 // zenityArgs builds the argv (after "zenity") for the About window.
 // zenity 3 names the icon with --icon-name, later versions with --icon.
-func zenityArgs(major int, info about.Info) []string {
+func zenityArgs(major int, info about.Info, iconFile string) []string {
 	icon := "--icon=" + info.IconName
-	if major == 3 {
+	switch {
+	case major == 3:
 		icon = "--icon-name=" + info.IconName
+	case iconFile != "":
+		icon = "--icon=" + iconFile
 	}
 	return []string{"--info", "--title=About " + info.Name, "--width=380",
 		"--ok-label=Close", "--modal", icon,
@@ -169,4 +179,35 @@ func aboutMarkup(info about.Info) string {
 	}
 	return "<b>" + escapeMarkup(info.Name) + "</b> " + escapeMarkup(info.Version) + "\n" +
 		escapeMarkup(info.Comments) + "\n\nLicense: " + escapeMarkup(info.License) + "\n" + link
+}
+
+// WriteIconFile writes data to dir/name unless that file already has exactly
+// this content, and returns its path. The directory is created if needed.
+func WriteIconFile(dir, name string, data []byte) (string, error) {
+	path := filepath.Join(dir, name)
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
+		return path, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(dir, ".icon-*.tmp")
+	if err != nil {
+		return "", err
+	}
+	_, werr := tmp.Write(data)
+	cerr := tmp.Close()
+	if err := errors.Join(werr, cerr); err != nil {
+		os.Remove(tmp.Name())
+		return "", err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		os.Remove(tmp.Name())
+		return "", err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return "", err
+	}
+	return path, nil
 }

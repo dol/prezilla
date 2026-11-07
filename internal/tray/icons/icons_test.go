@@ -151,3 +151,13 @@ func TestTrayIconColoursKeepContrast(t *testing.T) {
 		}
 	}
 }
+
+func TestAppIconIs128PixelsAndMostlyFilled(t *testing.T) {
+	w, h, opaque := decode(t, App)
+	if w != 128 || h != 128 {
+		t.Errorf("app icon is %dx%d, want 128x128", w, h)
+	}
+	if opaque < 0.3 {
+		t.Errorf("app icon is %.0f%% opaque, looks empty", opaque*100)
+	}
+}

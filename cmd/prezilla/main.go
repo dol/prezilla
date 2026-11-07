@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -73,10 +74,13 @@ func run(ctx context.Context) int {
 		// such file can shadow the icon name.
 		// Without zenity (or when it cannot start) the built-in X11 window
 		// takes over; the tray falls back to a notification if that fails.
-		zenity := system.ZenityAbout{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}}
+		// The logo is written to the cache directory so zenity gets a file
+		// path: the icon theme has no "prezilla" entry until the application
+		// is installed.
+		zenity := system.ZenityAbout{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}, IconFile: iconFile()}
 		aboutWindow := &system.FallbackAbout{
 			Primary:   zenity,
-			Secondary: system.X11About{Icon: icons.Idle},
+			Secondary: system.X11About{Icon: icons.App},
 			Note: func(error) {
 				fmt.Fprintln(os.Stderr, "about: zenity not available; showing the built-in window instead")
 			},
@@ -130,4 +134,18 @@ func spawnWatcher() error {
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// iconFile writes the embedded application icon under the user cache directory
+// and returns its path, or "" when that fails (zenity then uses the icon name).
+func iconFile() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	path, err := system.WriteIconFile(filepath.Join(dir, "prezilla"), "prezilla.png", icons.App)
+	if err != nil {
+		return ""
+	}
+	return path
 }

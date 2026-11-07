@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -220,5 +222,49 @@ func TestZenityAboutExit1WithOtherStderrIsClose(t *testing.T) {
 	r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w: some harmless warning", exitErr(1))
 	if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestZenityAboutIconFileReplacesTheNameFromVersion4(t *testing.T) {
+	cases := map[string]string{
+		"3.44.0": "--icon-name=prezilla", // zenity 3 has no file form
+		"4.2.1":  "--icon=/cache/prezilla.png",
+	}
+	for ver, flag := range cases {
+		z, r := newZenity(ver)
+		z.IconFile = "/cache/prezilla.png"
+		if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
+			t.Fatalf("%q: %v", ver, err)
+		}
+		if len(r.Calls) != 2 || r.Calls[1] != zenityKey(flag, wantMarkup) {
+			t.Errorf("version %q: calls %q, want flag %s", ver, r.Calls, flag)
+		}
+	}
+}
+
+func TestWriteIconFileWritesOnceAndReplacesChangedContent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache", "prezilla")
+	path, err := WriteIconFile(dir, "prezilla.png", []byte("one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != filepath.Join(dir, "prezilla.png") {
+		t.Errorf("path %q", path)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "one" {
+		t.Errorf("content %q", got)
+	}
+	if _, err := WriteIconFile(dir, "prezilla.png", []byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "two" {
+		t.Errorf("changed content not replaced: %q", got)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("stray files left in %s: %v", dir, entries)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o644 {
+		t.Errorf("mode %v", fi.Mode().Perm())
 	}
 }

@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Mute and show-desktop no longer need external audio or window-manager tools: they use native PulseAudio and EWMH clients, and packages no longer recommend those tools.
 
 ### Fixed
+- About: the logo shows in the zenity window and in the built-in window even when Prezilla is not installed (it was a broken-image placeholder, because the icon theme has no `prezilla` entry until installation); the logo is written to the user cache directory for zenity.
 - `minimize`: after alt+tab to a window during presentation mode, turning the mode off brought back only that window. Prezilla now remembers the windows it minimized and restores them itself when the window manager has forgotten them; windows you had minimized before stay minimized.
 - External commands time out after 10 s and engine operations after 25 s, so a hung `xfconf-query` or native audio/X11 call can no longer hold the state lock and block `off`, the watcher and the tray.
 - Concurrent `prezilla` processes (tray, CLI, watcher) serialize on a state lock, so originals can no longer be lost; the state file is fsynced on save.
