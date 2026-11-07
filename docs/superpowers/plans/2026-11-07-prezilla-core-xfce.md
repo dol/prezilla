@@ -15,7 +15,8 @@
 - Binary and app name: `prezilla`. Go module path: `prezilla`.
 - Switch IDs (exact): `icons`, `notifications`, `mute`, `minimize`, `wallpaper`.
 - Toggling twice must leave the system exactly as it was (restore original values, never forced defaults).
-- CLI subcommands (exact): `on`, `off`, `toggle`, `status`, `tray`, `version`. Exit codes: 0 success, 1 runtime error, 2 usage error.
+- CLI subcommands (exact): `on`, `off`, `toggle`, `status`, `tray`, `version`, `about` (added in Task 14).
+- About info (exact, shared by CLI and tray): program name `prezilla`, comments `Presentation mode switcher`, license `Apache-2.0`, website `https://github.com/dol/prezilla` (assumed, same as `nfpm.yaml`), website label `github.com/dol/prezilla`, icon name `prezilla`. No GTK/cgo: the user wants one static binary, so the "About page" is the `about` command plus a tray menu entry that uses a desktop notification and opens the website link (modelled on tunewise's tray "About" item). Exit codes: 0 success, 1 runtime error, 2 usage error.
 - Config: `os.UserConfigDir()/prezilla/config.json`. State: `os.UserStateDir`-style, i.e. `$XDG_STATE_HOME/prezilla/state.json`, falling back to `~/.local/state/prezilla/state.json`.
 - No dependencies beyond stdlib except `fyne.io/systray` (tray task only), `github.com/godbus/dbus/v5` (already in the graph via systray), and — added on the user's request (they do not want to install `pactl`/`wmctrl`) — `github.com/jfreymuth/pulse` (native PulseAudio/PipeWire-pulse protocol, Task 11) and `github.com/jezek/xgbutil` (EWMH over pure-Go X11, Task 12). No cgo anywhere.
 - Runtime requirement from the user: no extra packages beyond the XFCE session itself (`xfconf-query` ships with XFCE). `pactl`, `wmctrl` and `env` must NOT be required after Task 13.
@@ -32,6 +33,8 @@
 5. Corrupt or unreadable `state.json`: error naming the file path, no silent reset that would lose originals — Task 2.
 6. Running on an unsupported desktop (no `XDG_CURRENT_DESKTOP` match): CLI exits 1 with `unsupported desktop "<value>"` — Task 6.
 7. No tray host available (no StatusNotifier watcher): `prezilla tray` exits 1 with a hint to use the CLI instead of hanging — Task 8.
+16. `prezilla about` and `prezilla version` must work with a broken config or on an unsupported desktop (they need neither) — Task 14.
+17. Tray About with no notification daemon / no session bus, and Project website with neither `xdg-open` nor `exo-open` installed: an error shown in the tooltip and on stderr, never a crash or hang; presentation mode's own do-not-disturb may hide the About notification (expected, documented) — Task 15.
 13. No audio server running / socket missing / sink unplugged between `on` and `off`: mute errors clearly (or no-ops for a vanished sink), never panics or hangs, other switches proceed — Task 11.
 14. No `DISPLAY` / X server unreachable: minimize errors clearly, other switches proceed — Task 12.
 15. Saved state written by the tool-based version (`yes`/`no`, `<name>\tyes|no`, `on`/`off`) must still restore after upgrading to the native backends — Tasks 11 and 12.
@@ -58,6 +61,7 @@
 - `packaging/icons/**`, `scripts/render-icons.sh`, `internal/tray/icons/` — icon sources, rendered hicolor set, embedded tray icons (Task 7).
 - `Makefile`, `nfpm.yaml`, `CHANGELOG.md`, `LICENSE`, `.github/workflows/`, `scripts/check-install.sh` — build, install, packages, CI (Task 10).
 - `internal/system/{audio,pulse,windows,x11}.go` — native PulseAudio and X11/EWMH clients behind `Audio`/`Windows` interfaces and `Backends` (Tasks 11–12); Task 13 removes the old tool dependencies from docs and packages.
+- `internal/about/` — shared About info and `prezilla about` (Task 14); `internal/system/{notify,open}.go` — notification and URL-opener backends for the tray About and website entries (Task 15).
 
 ---
 
@@ -329,6 +333,48 @@ Design (decided; in the style of the sibling project `/home/dol/project/tunewise
 - [ ] **Step 3: Update `nfpm.yaml`:** remove the `recommends`/`depends` entries for `wmctrl`, `pulseaudio-utils`, `libpulse` for all three packagers. Add a `[Unreleased]` CHANGELOG entry (Changed: mute and show-desktop no longer need external tools).
 - [ ] **Step 4: Run** `go mod tidy && go vet ./... && go test -race -count=1 ./... && make package VERSION=0.0.0-test` then `dpkg-deb -I dist/prezilla_0.0.0-test_amd64.deb` — Expected: all pass and the control file has no `wmctrl`/`pulseaudio-utils`. `ldd ./prezilla` (after `make build`) prints `not a dynamic executable`.
 - [ ] **Step 5: Commit** `chore: drop pactl and wmctrl from docs and packages`.
+
+---
+
+### Task 14: About info and `prezilla about`
+
+**Files:**
+- Create: `internal/about/about.go`, `internal/about/about_test.go`; Modify: `internal/cli/cli.go`, `internal/cli/cli_test.go`, `cmd/prezilla/main.go`, `README.md`, `CHANGELOG.md`
+
+**Interfaces:**
+- Produces:
+  - `package about`: `const (Name = "prezilla"; Comments = "Presentation mode switcher"; License = "Apache-2.0"; Website = "https://github.com/dol/prezilla"; WebsiteLabel = "github.com/dol/prezilla"; IconName = "prezilla")`; `type Info struct { Name, Version, Comments, License, Website, WebsiteLabel, IconName string }`; `func New(version string) Info` (fills the constants, empty version becomes `dev`); `func (i Info) Text() string` — exactly these lines, each ending in `\n`: `prezilla <version>`, `<Comments>`, `License: <License>`, `Website: <Website>`.
+  - CLI command `about` (exit 0, prints `about.New(Deps.Version).Text()` to stdout). `cmd/prezilla/main.go` handles `about` before loading config or detecting the desktop, exactly like `version`.
+
+- [ ] **Step 1: Write failing tests:** `TestNewDefaultsVersionToDev`, `TestTextExactLines` (`New("1.2.3").Text() == "prezilla 1.2.3\nPresentation mode switcher\nLicense: Apache-2.0\nWebsite: https://github.com/dol/prezilla\n"`), CLI `TestRunAboutPrintsTextAndExitsZero` (works with `Deps.Engine == nil`), and a main-level decision test (reuse the table from the config-fallback logic in `internal/cli`) asserting `about` never needs config or desktop detection.
+- [ ] **Step 2: Run** `go test ./internal/about/... ./internal/cli/...` — Expected: FAIL.
+- [ ] **Step 3: Implement** `about.go`, the `about` CLI case and the `main.go` early path; add `about` to the usage string.
+- [ ] **Step 4: Run** `go vet ./... && go test -race -count=1 ./...` — Expected: PASS; then `go build -o prezilla ./cmd/prezilla && ./prezilla about` prints the four lines and `XDG_CURRENT_DESKTOP=GNOME ./prezilla about` still works.
+- [ ] **Step 5: Update `README.md`** (CLI usage lists `about`) and `CHANGELOG.md` `[Unreleased]` (Added: `prezilla about`).
+- [ ] **Step 6: Commit** `feat: about info and prezilla about command`.
+
+---
+
+### Task 15: Tray "About" and "Project website"
+
+**Files:**
+- Create: `internal/system/notify.go`, `internal/system/open.go`, `internal/system/notify_test.go`; Modify: `internal/tray/tray.go`, `internal/tray/tray_test.go`, `cmd/prezilla/main.go`, `README.md`, `CHANGELOG.md`
+
+**Interfaces:**
+- Consumes: `about.Info` (Task 14); `system.Runner`.
+- Produces:
+  - `type system.Notifier interface { Notify(ctx context.Context, summary, body, iconName string) error }`; `type DBusNotifier struct{ Timeout time.Duration }` implementing it via `godbus` on the session bus (`org.freedesktop.Notifications.Notify`, app name `prezilla`, no actions, expire 10 000 ms; connection or call failure error text starts `notify:`; zero `Timeout` = 5 s); `type FakeNotifier struct` recording calls.
+  - `type system.Opener interface { Open(ctx context.Context, url string) error }`; `type ExecOpener struct{ Runner Runner }` trying `xdg-open <url>` then `exo-open <url>` (XFCE ships `exo-open`), returning an error that names both when both fail; `type FakeOpener struct` recording calls.
+  - `type tray.Config struct { Engine *core.Engine; Timeout time.Duration; Spawn func() error; About about.Info; Notifier system.Notifier; Opener system.Opener }` and `func tray.Run(ctx context.Context, cfg tray.Config) error` replacing the current positional parameters (update `main.go` and all tray tests).
+  - Menu order: toggle item, separator, `About prezilla`, `Project website`, separator, `Quit`. About click: `Notifier.Notify(ctx, "prezilla "+Version, Comments+"\nLicense: "+License+"\n"+Website, IconName)`; website click: `Opener.Open(ctx, Website)`. Both run off the systray goroutine, each bounded by `core.OperationTimeout`-style ten second contexts, never blocking toggle or Quit; any error goes to stderr and into the tooltip like `lastErr`.
+
+- [ ] **Step 1: Write failing tests:** `TestDBusNotifierNoSessionBusErrorsFast` (unset `DBUS_SESSION_BUS_ADDRESS`/invalid socket; error contains `notify`, returns within 2 s), `TestExecOpenerFallsBackToExoOpen` (FakeRunner: `xdg-open` errors, `exo-open` called), `TestExecOpenerBothFailNamesBoth`, tray tests for a pure helper `aboutMessage(info about.Info) (summary, body string)` with the exact strings above, and a testable click helper using `FakeNotifier`/`FakeOpener` asserting one call each and error propagation into the tooltip text.
+- [ ] **Step 2: Run** `go test ./internal/system/... ./internal/tray/...` — Expected: FAIL.
+- [ ] **Step 3: Implement** `notify.go`, `open.go`, the `tray.Config` refactor, the two menu items and `main.go` wiring (real `DBusNotifier{}` and `ExecOpener{Runner: system.ExecRunner{}}`).
+- [ ] **Step 4: Run** `go vet ./... && go test -race -count=1 ./...` — Expected: PASS.
+- [ ] **Step 5: Manual check:** with a throwaway program under the scratchpad (not `prezilla on`), send one real notification through `DBusNotifier` (it will appear on the user's desktop; record the output) and confirm `ExecOpener` finds `xdg-open` or `exo-open` with `command -v` (do not open a browser). Clicking the real tray items is left to the user.
+- [ ] **Step 6: Update `README.md`** (tray menu entries, note that presentation mode's do-not-disturb may hide the About notification, optional `xdg-open`/`exo-open` for the website link) and `CHANGELOG.md`.
+- [ ] **Step 7: Commit** `feat: tray about and project website entries`.
 
 ---
 
