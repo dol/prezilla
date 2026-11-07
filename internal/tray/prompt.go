@@ -48,15 +48,27 @@ func promptRequest(info about.Info, st core.State, now time.Time) system.Prompt 
 	}
 }
 
+// continueStep is how far "continue" moves the deadline: the configured
+// timeout, or the default 30 minutes when none is configured (a deadline can
+// still exist through "on --for").
+func continueStep(cfgTimeout time.Duration) time.Duration {
+	if cfgTimeout > 0 {
+		return cfgTimeout
+	}
+	return core.DefaultConfig().Timeout()
+}
+
 // promptDeps is what the coordinator needs; tests inject fakes.
 type promptDeps struct {
 	// prompter shows the notification; nil leaves only the menu items.
 	prompter system.Prompter
 	info     about.Info
 	status   func() (core.State, error)
-	enable   func(ctx context.Context) error // moves the deadline while active
-	disable  func(ctx context.Context) error
-	now      func() time.Time
+	// extend moves the deadline of a live session (never shortens or clears
+	// it) and reports false, changing nothing, once the session has ended.
+	extend  func(ctx context.Context) (bool, error)
+	disable func(ctx context.Context) error
+	now     func() time.Time
 	// changed is called (never with locks held) when the pending state or
 	// the error text changed, so the tray can redraw.
 	changed func()
@@ -213,7 +225,10 @@ func (c *promptCoordinator) apply(ctx context.Context, key string) {
 	var op func(context.Context) error
 	switch key {
 	case keyContinue:
-		op = c.d.enable
+		if c.d.extend != nil {
+			// Extend's under-lock check is the authority; false is a no-op.
+			op = func(ctx context.Context) error { _, err := c.d.extend(ctx); return err }
+		}
 	case keyEnd:
 		op = c.d.disable
 	}

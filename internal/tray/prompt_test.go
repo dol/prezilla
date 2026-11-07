@@ -87,6 +87,10 @@ type fakeEngine struct {
 	opErr    error
 	ctxs     []context.Context
 	gate     chan struct{} // when set, engine calls wait for it after recording
+	// endsFirst simulates a Disable that holds the lock while Status still
+	// reads active: Extend then finds the session ended.
+	endsFirst bool
+	spawns    int
 }
 
 // record notes one engine call and waits for gate, if any.
@@ -150,14 +154,24 @@ func newFixture(t *testing.T, p *system.FakePrompter) *coordFixture {
 		prompter: prompter,
 		info:     about.New("1"),
 		status:   eng.status,
-		enable: func(ctx context.Context) error {
+		extend: func(ctx context.Context) (bool, error) {
 			eng.record(ctx, true)
 			eng.mu.Lock()
 			defer eng.mu.Unlock()
-			if eng.opErr == nil {
-				eng.st.ExpiresAt = now.Add(testTimeout)
+			if eng.endsFirst {
+				eng.st = core.State{}
 			}
-			return eng.opErr
+			if eng.opErr != nil {
+				return false, eng.opErr
+			}
+			// Like Engine.Extend: never turns a session on.
+			if !eng.st.Active || eng.st.ExpiresAt.IsZero() || !now.Before(eng.st.ExpiresAt) {
+				return false, nil
+			}
+			if next := now.Add(testTimeout); next.After(eng.st.ExpiresAt) {
+				eng.st.ExpiresAt = next
+			}
+			return true, nil
 		},
 		disable: func(ctx context.Context) error {
 			eng.record(ctx, false)
@@ -472,5 +486,43 @@ func TestCoordinatorChangedCalled(t *testing.T) {
 	case <-f.changed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("changed not called on answer")
+	}
+}
+
+func TestCoordinatorContinueAfterConcurrentEndDoesNotResurrect(t *testing.T) {
+	p := blockingPrompter()
+	f := newFixture(t, p)
+	f.eng.endsFirst = true // Status still says active; Extend sees it ended
+	f.ss.Emit(true)
+	eventually(t, "prompt", f.c.pending)
+	p.Answer <- "continue"
+	eventually(t, "extend", func() bool { e, _ := f.eng.counts(); return e == 1 })
+	time.Sleep(20 * time.Millisecond)
+	st, _ := f.eng.status()
+	if st.Active || !st.ExpiresAt.IsZero() {
+		t.Errorf("session resurrected: %+v", st)
+	}
+	f.eng.mu.Lock()
+	spawns := f.eng.spawns
+	f.eng.mu.Unlock()
+	if _, d := f.eng.counts(); d != 0 || spawns != 0 {
+		t.Errorf("disables %d spawns %d", d, spawns)
+	}
+	if f.c.errText() != "" {
+		t.Errorf("err %q", f.c.errText())
+	}
+}
+
+func TestContinueStep(t *testing.T) {
+	cases := []struct{ cfg, want time.Duration }{
+		{0, 30 * time.Minute},
+		{-time.Minute, 30 * time.Minute},
+		{45 * time.Minute, 45 * time.Minute},
+		{2 * time.Hour, 2 * time.Hour},
+	}
+	for _, c := range cases {
+		if got := continueStep(c.cfg); got != c.want {
+			t.Errorf("continueStep(%v) = %v want %v", c.cfg, got, c.want)
+		}
 	}
 }

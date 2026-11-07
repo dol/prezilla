@@ -229,7 +229,7 @@ func Run(ctx context.Context, cfg Config) error {
 		prompter: cfg.Prompter,
 		info:     cfg.About,
 		status:   e.Status,
-		enable:   func(ctx context.Context) error { return e.Enable(ctx, cfg.Timeout) },
+		extend:   func(ctx context.Context) (bool, error) { return e.Extend(ctx, continueStep(cfg.Timeout)) },
 		disable:  e.Disable,
 		now:      time.Now,
 		changed: func() {

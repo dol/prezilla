@@ -189,6 +189,37 @@ func (e *Engine) DisableIfExpired(ctx context.Context) (bool, error) {
 	return true, e.disableLocked(ctx)
 }
 
+// Extend moves the deadline of a live session to now+timeout unless it is
+// already later; it never clears or shortens it. Under the state lock it
+// changes nothing and reports false when the mode is off, has no deadline,
+// the deadline has been reached, or timeout <= 0, so it can never turn a
+// session back on. No switch is ever called.
+func (e *Engine) Extend(ctx context.Context, timeout time.Duration) (bool, error) {
+	if timeout <= 0 {
+		return false, nil
+	}
+	unlock, err := e.store.Lock()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	st, err := e.store.Load()
+	if err != nil {
+		return false, err
+	}
+	now := e.now()
+	if !st.Active || st.ExpiresAt.IsZero() || !now.Before(st.ExpiresAt) {
+		return false, nil
+	}
+	if next := now.Add(timeout); next.After(st.ExpiresAt) {
+		st.ExpiresAt = next
+	}
+	if err := e.store.Save(st); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Status reads the state without locking; Save's atomic rename means it
 // always sees a whole file.
 func (e *Engine) Status() (State, error) { return e.store.Load() }
