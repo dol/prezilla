@@ -8,7 +8,7 @@ back when you are done. XFCE on X11 first; other desktops are planned.
 - Five switches, each saving the original value and restoring it on `off`:
   - `icons`: hides desktop icons
   - `notifications`: enables do-not-disturb in `xfce4-notifyd`
-  - `mute`: mutes the default audio sink (only unmutes if it was not muted before)
+  - `mute`: mutes the default audio sink and later unmutes that same output, even if the default changed meanwhile (only if it was not muted before)
   - `minimize`: shows the desktop (minimizes all windows)
   - `wallpaper`: swaps the wallpaper on every monitor/workspace; off unless `wallpaper` is set in the config to a path to an image file
 - Auto-disable after 30 minutes by default (`timeout_minutes`, or `--for` per call), enforced by a detached background watcher
@@ -57,7 +57,7 @@ Packages already autostart the tray at login. After `make install` or a tarball 
 mkdir -p ~/.config/autostart
 cp packaging/prezilla.desktop ~/.config/autostart/
 ```
-If the panel's StatusNotifier host is not up yet when autostart runs, `prezilla tray` can exit 1. Log in again or start `prezilla tray` from the panel's launcher; the CLI works regardless.
+If the panel's StatusNotifier host is not up yet when autostart runs, `prezilla tray` can exit 1. It still first restores a session whose deadline has passed and keeps a live deadline watched. Log in again or start `prezilla tray` from the panel's launcher; the CLI works regardless.
 The application icon lives in `packaging/icons/`.
 
 ## Usage
@@ -74,7 +74,9 @@ prezilla version
 - `off` restores everything and is a no-op when inactive.
 - `status` prints one of `inactive`, `active` or `active until HH:MM`, and first disables the mode if its deadline has passed.
 - `tray` runs the tray icon until you choose Quit.
-- When a deadline is set, `on`/`toggle` start a detached `prezilla watch` that restores everything at expiry (the tray also checks every 2 seconds).
+- When a deadline is set, `on`/`toggle` and turning the mode on from the tray start a detached `prezilla watch` that restores everything at expiry, even after the tray quits (the tray also checks every 2 seconds).
+
+If `config.json` cannot be read, `on` and `toggle` fail, while `off`, `status` and `tray` print a warning and continue with the default configuration, so a broken config never blocks restoring. `off` restores every saved switch, even one removed from the config since `on`.
 
 Exit codes: `0` success, `1` a switch, state or config error (the message goes to stderr), `2` usage error (unknown command, bad flag, invalid `--for`).
 
