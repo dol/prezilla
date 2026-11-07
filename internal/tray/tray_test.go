@@ -203,3 +203,24 @@ func TestJoinErrText(t *testing.T) {
 		}
 	}
 }
+
+func TestNilDependenciesYieldErrors(t *testing.T) {
+	info := about.New("1")
+	cases := []struct {
+		fn   func(context.Context) error
+		want string
+	}{
+		{aboutAction(nil, info), "about: no notifier configured"},
+		{websiteAction(nil, info), "website: no opener configured"},
+	}
+	for _, c := range cases {
+		var a actionState
+		a.run(context.Background(), c.fn, func() {})
+		if a.text() != c.want {
+			t.Errorf("text %q want %q", a.text(), c.want)
+		}
+		if tip := tooltip(false, "", a.text(), ""); !strings.Contains(tip, "(error: "+c.want+")") {
+			t.Errorf("tooltip %q", tip)
+		}
+	}
+}

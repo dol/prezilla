@@ -147,13 +147,21 @@ func aboutMessage(info about.Info) (summary, body string) {
 
 func aboutAction(n system.Notifier, info about.Info) func(context.Context) error {
 	return func(ctx context.Context) error {
+		if n == nil {
+			return errors.New("about: no notifier configured")
+		}
 		summary, body := aboutMessage(info)
 		return n.Notify(ctx, summary, body, info.IconName)
 	}
 }
 
 func websiteAction(o system.Opener, info about.Info) func(context.Context) error {
-	return func(ctx context.Context) error { return o.Open(ctx, info.Website) }
+	return func(ctx context.Context) error {
+		if o == nil {
+			return errors.New("website: no opener configured")
+		}
+		return o.Open(ctx, info.Website)
+	}
 }
 
 // joinErrText joins two non-empty error texts with "; ".
