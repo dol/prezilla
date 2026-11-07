@@ -21,11 +21,21 @@ type Prompt struct {
 
 // Prompter asks a question and waits for the answer.
 type Prompter interface {
-	// Ask blocks until an action is invoked (its key is returned), the
-	// notification is closed (returns "", nil) or ctx ends (the notification
-	// is closed and the wrapped ctx error returned).
+	// Ask blocks until an action is invoked (its key is returned), the user
+	// dismissed the notification (returns "", nil), the notification server
+	// closed it for any other reason (returns "", ErrNotificationGone: the
+	// question is unanswered) or ctx ends (the notification is closed and the
+	// wrapped ctx error returned).
 	Ask(ctx context.Context, p Prompt) (key string, err error)
 }
+
+// ErrNotificationGone reports that the notification server closed a prompt
+// (expired, suppressed, closed by a call or for an undefined reason) without
+// the user answering or dismissing it. The question is still open.
+var ErrNotificationGone = errors.New("notify: notification closed by the server")
+
+// closedByUser is the NotificationClosed reason "dismissed by the user".
+const closedByUser = uint32(2)
 
 const (
 	notifyIface        = "org.freedesktop.Notifications"
@@ -123,9 +133,12 @@ func (d DBusPrompter) Ask(ctx context.Context, p Prompt) (string, error) {
 			if !ok {
 				return "", errors.New("notify: connection closed")
 			}
-			key, done := promptSignal(sig, id)
+			key, done, err := promptSignal(sig, id)
 			if !done {
 				continue
+			}
+			if err != nil {
+				return "", err
 			}
 			if key != "" {
 				// Resident notifications stay after an action; remove it.
@@ -164,26 +177,32 @@ func hasCapability(caps []string, want string) bool {
 
 // promptSignal interprets a notification signal for notification id: done is
 // true for ActionInvoked (key is the action) and NotificationClosed (key "").
-func promptSignal(sig *dbus.Signal, id uint32) (key string, done bool) {
+// A close for any reason other than "dismissed by the user" (including a
+// malformed reason) yields ErrNotificationGone.
+func promptSignal(sig *dbus.Signal, id uint32) (key string, done bool, err error) {
 	if sig == nil || len(sig.Body) < 2 {
-		return "", false
+		return "", false, nil
 	}
 	if got, ok := sig.Body[0].(uint32); !ok || got != id {
-		return "", false
+		return "", false, nil
 	}
 	switch sig.Name {
 	case notifyIface + ".ActionInvoked":
 		k, ok := sig.Body[1].(string)
-		return k, ok
+		return k, ok, nil
 	case notifyIface + ".NotificationClosed":
-		return "", true
+		if reason, ok := sig.Body[1].(uint32); ok && reason == closedByUser {
+			return "", true, nil
+		}
+		return "", true, ErrNotificationGone
 	}
-	return "", false
+	return "", false, nil
 }
 
-// FakePrompter records prompts. Ask returns Err if set; otherwise, with
-// Answer non-nil, it blocks for a key from Answer or the end of ctx; else it
-// returns Key.
+// FakePrompter records prompts. Ask returns Err if set (use
+// ErrNotificationGone to simulate a server-closed notification); otherwise,
+// with Answer non-nil, it blocks for a key from Answer or the end of ctx;
+// else it returns Key.
 type FakePrompter struct {
 	Key    string
 	Err    error

@@ -3,6 +3,7 @@ package tray
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -421,6 +422,56 @@ func TestCoordinatorPrompterErrorKeepsMenuFallback(t *testing.T) {
 	eventually(t, "enable", func() bool { e, _ := f.eng.counts(); return e == 1 })
 	if f.c.errText() != "" {
 		t.Errorf("successful answer kept error %q", f.c.errText())
+	}
+}
+
+func TestCoordinatorServerClosedNotificationKeepsMenuOpen(t *testing.T) {
+	p := &system.FakePrompter{Err: fmt.Errorf("wrapped: %w", system.ErrNotificationGone)}
+	f := newFixture(t, p)
+	f.ss.Emit(true)
+	eventually(t, "prompt", func() bool { return len(p.Prompts()) == 1 })
+	time.Sleep(50 * time.Millisecond) // let the Ask goroutine finish
+	if !f.c.pending() {
+		t.Fatal("menu items withdrawn after the server closed the notification")
+	}
+	if got := f.c.errText(); got != "" {
+		t.Errorf("server close surfaced in the tooltip: %q", got)
+	}
+	if e, d := f.eng.counts(); e != 0 || d != 0 {
+		t.Errorf("enables %d disables %d", e, d)
+	}
+	f.c.menuAnswer(f.ctx, "continue")
+	eventually(t, "enable", func() bool { e, _ := f.eng.counts(); return e == 1 })
+	if f.c.pending() || f.c.errText() != "" {
+		t.Errorf("pending %v err %q", f.c.pending(), f.c.errText())
+	}
+}
+
+func TestCoordinatorServerClosedThenSessionEndsResolves(t *testing.T) {
+	p := &system.FakePrompter{Err: system.ErrNotificationGone}
+	f := newFixture(t, p)
+	f.ss.Emit(true)
+	eventually(t, "prompt", func() bool { return len(p.Prompts()) == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if !f.c.pending() {
+		t.Fatal("not pending")
+	}
+	f.c.check(core.State{}, f.now)
+	if f.c.pending() {
+		t.Error("ended session kept the question open")
+	}
+}
+
+func TestCoordinatorUserDismissedResolves(t *testing.T) {
+	p := &system.FakePrompter{Key: ""}
+	f := newFixture(t, p)
+	f.ss.Emit(true)
+	eventually(t, "prompt", func() bool { return len(p.Prompts()) == 1 })
+	eventually(t, "resolved", func() bool { return !f.c.pending() })
+	f.c.menuAnswer(f.ctx, "end") // the items are gone: ignored
+	time.Sleep(20 * time.Millisecond)
+	if e, d := f.eng.counts(); e != 0 || d != 0 || f.c.errText() != "" {
+		t.Errorf("enables %d disables %d err %q", e, d, f.c.errText())
 	}
 }
 

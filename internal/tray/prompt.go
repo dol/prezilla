@@ -2,6 +2,7 @@ package tray
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -174,6 +175,14 @@ func (c *promptCoordinator) finish(ctx, pctx context.Context, gen uint64, key st
 		c.resolveLocked()
 		c.mu.Unlock()
 		c.d.changed()
+		return
+	}
+	if errors.Is(err, system.ErrNotificationGone) {
+		// The server withdrew the notification (do-not-disturb, expiry):
+		// the question stays open through the menu items, with no tooltip
+		// error. Only a stderr line records it.
+		c.mu.Unlock()
+		fmt.Fprintln(os.Stderr, err)
 		return
 	}
 	if err != nil {

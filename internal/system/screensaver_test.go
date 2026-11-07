@@ -163,20 +163,32 @@ func TestPromptSignalMatching(t *testing.T) {
 		sig  *dbus.Signal
 		key  string
 		done bool
+		gone bool
 	}{
-		{"action", &dbus.Signal{Name: notifyIface + ".ActionInvoked", Body: []any{id, "continue"}}, "continue", true},
-		{"closed", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{id, uint32(2)}}, "", true},
-		{"other id action", &dbus.Signal{Name: notifyIface + ".ActionInvoked", Body: []any{uint32(8), "end"}}, "", false},
-		{"other id closed", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{uint32(8), uint32(2)}}, "", false},
-		{"other member", &dbus.Signal{Name: notifyIface + ".Other", Body: []any{id, "x"}}, "", false},
-		{"short body", &dbus.Signal{Name: notifyIface + ".ActionInvoked", Body: []any{id}}, "", false},
-		{"nil", nil, "", false},
+		{"action", &dbus.Signal{Name: notifyIface + ".ActionInvoked", Body: []any{id, "continue"}}, "continue", true, false},
+		{"closed by user", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{id, uint32(2)}}, "", true, false},
+		{"expired", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{id, uint32(1)}}, "", true, true},
+		{"closed by call", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{id, uint32(3)}}, "", true, true},
+		{"undefined reason", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{id, uint32(4)}}, "", true, true},
+		{"malformed reason", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{id, "x"}}, "", true, true},
+		{"other id action", &dbus.Signal{Name: notifyIface + ".ActionInvoked", Body: []any{uint32(8), "end"}}, "", false, false},
+		{"other id closed", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{uint32(8), uint32(2)}}, "", false, false},
+		{"other id expired", &dbus.Signal{Name: notifyIface + ".NotificationClosed", Body: []any{uint32(8), uint32(1)}}, "", false, false},
+		{"other member", &dbus.Signal{Name: notifyIface + ".Other", Body: []any{id, "x"}}, "", false, false},
+		{"short body", &dbus.Signal{Name: notifyIface + ".ActionInvoked", Body: []any{id}}, "", false, false},
+		{"nil", nil, "", false, false},
 	}
 	for _, c := range cases {
-		key, done := promptSignal(c.sig, id)
-		if key != c.key || done != c.done {
-			t.Errorf("%s: got %q,%v want %q,%v", c.name, key, done, c.key, c.done)
+		key, done, err := promptSignal(c.sig, id)
+		if key != c.key || done != c.done || errors.Is(err, ErrNotificationGone) != c.gone || (err != nil && !c.gone) {
+			t.Errorf("%s: got %q,%v,%v want %q,%v gone=%v", c.name, key, done, err, c.key, c.done, c.gone)
 		}
+	}
+}
+
+func TestErrNotificationGoneText(t *testing.T) {
+	if got := ErrNotificationGone.Error(); got != "notify: notification closed by the server" {
+		t.Errorf("text %q", got)
 	}
 }
 
