@@ -144,3 +144,72 @@ func TestValidateImage(t *testing.T) {
 		}
 	}
 }
+
+func TestFallbackChooserPortalMissingUsesSecondary(t *testing.T) {
+	p := &FakeChooser{Err: fmt.Errorf("file chooser: portal: %w: x", ErrNoPortal)}
+	z := &FakeChooser{Path: "/pics/a.png"}
+	got, err := (&FallbackChooser{Primary: p, Secondary: z}).ChooseImage(context.Background(), "/home")
+	if err != nil || got != "/pics/a.png" || len(p.Calls) != 1 || len(z.Calls) != 1 || z.Calls[0] != "/home" {
+		t.Fatalf("got %q, %v; calls %v %v", got, err, p.Calls, z.Calls)
+	}
+}
+
+func TestFallbackChooserPrimaryResultsAreFinal(t *testing.T) {
+	for name, perr := range map[string]error{
+		"cancelled": ErrCancelled,
+		"failed":    fmt.Errorf("file chooser: portal: %w: boom", ErrPortalFailed),
+		"no zenity": ErrNoZenity, // not a portal error: no fallback by default
+	} {
+		p := &FakeChooser{Err: perr}
+		z := &FakeChooser{Path: "/z.png"}
+		_, err := (&FallbackChooser{Primary: p, Secondary: z}).ChooseImage(context.Background(), "/")
+		if !errors.Is(err, perr) || len(z.Calls) != 0 {
+			t.Errorf("%s: err %v, secondary calls %v", name, err, z.Calls)
+		}
+	}
+	p := &FakeChooser{Path: "/p.png"}
+	z := &FakeChooser{}
+	if got, err := (&FallbackChooser{Primary: p, Secondary: z}).ChooseImage(context.Background(), "/"); got != "/p.png" || err != nil || len(z.Calls) != 0 {
+		t.Errorf("chosen: %q %v %v", got, err, z.Calls)
+	}
+}
+
+func TestFallbackChooserContextEndIsFinal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	p := &FakeChooser{Err: fmt.Errorf("%w: %w", ErrNoPortal, context.Canceled)}
+	z := &FakeChooser{Path: "/z.png"}
+	if _, err := (&FallbackChooser{Primary: p, Secondary: z}).ChooseImage(ctx, "/"); err == nil || len(z.Calls) != 0 {
+		t.Errorf("err %v, secondary calls %v", err, z.Calls)
+	}
+}
+
+func TestFallbackChooserSecondaryCancelIsFinal(t *testing.T) {
+	p := &FakeChooser{Err: ErrNoPortal}
+	z := &FakeChooser{Err: ErrCancelled}
+	_, err := (&FallbackChooser{Primary: p, Secondary: z}).ChooseImage(context.Background(), "/")
+	if !errors.Is(err, ErrCancelled) || errors.Is(err, ErrNoChooser) {
+		t.Errorf("err %v", err)
+	}
+}
+
+func TestFallbackChooserBothMissingIsErrNoChooser(t *testing.T) {
+	p := &FakeChooser{Err: fmt.Errorf("%w: no bus", ErrNoPortal)}
+	z := &FakeChooser{Err: fmt.Errorf("%w: exec: not found", ErrNoZenity)}
+	_, err := (&FallbackChooser{Primary: p, Secondary: z}).ChooseImage(context.Background(), "/")
+	if !errors.Is(err, ErrNoChooser) {
+		t.Errorf("err %v", err)
+	}
+	if _, err := (&FallbackChooser{}).ChooseImage(context.Background(), "/"); !errors.Is(err, ErrNoChooser) {
+		t.Errorf("empty: %v", err)
+	}
+}
+
+func TestFallbackChooserCustomShouldFallback(t *testing.T) {
+	p := &FakeChooser{Err: ErrPortalFailed}
+	z := &FakeChooser{Path: "/z.png"}
+	fc := &FallbackChooser{Primary: p, Secondary: z, ShouldFallback: func(err error) bool { return errors.Is(err, ErrPortalFailed) }}
+	if got, err := fc.ChooseImage(context.Background(), "/"); err != nil || got != "/z.png" {
+		t.Errorf("got %q %v", got, err)
+	}
+}

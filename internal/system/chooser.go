@@ -27,6 +27,16 @@ var ErrNotImage = errors.New("not an image file")
 // imageExts are the accepted image extensions, matched case-insensitively.
 var imageExts = []string{"png", "jpg", "jpeg", "webp", "bmp", "gif", "tif", "tiff", "svg"}
 
+// imagePatterns are the glob patterns of the accepted images, each extension
+// in lower and upper case, for the file dialogs' filters.
+func imagePatterns() []string {
+	pats := make([]string, 0, 2*len(imageExts))
+	for _, e := range imageExts {
+		pats = append(pats, "*."+e, "*."+strings.ToUpper(e))
+	}
+	return pats
+}
+
 // ValidateImage checks that path is an existing regular file with an
 // accepted image extension.
 func ValidateImage(path string) error {
@@ -76,13 +86,9 @@ type ZenityChooser struct {
 // chooserArgs builds the argv (after "zenity") for the file dialog. The
 // --filename must end with "/" so the dialog starts inside the directory.
 func chooserArgs(startDir string) []string {
-	var pats []string
-	for _, e := range imageExts {
-		pats = append(pats, "*."+e, "*."+strings.ToUpper(e))
-	}
 	return []string{"--file-selection", "--title=Choose wallpaper",
 		"--filename=" + strings.TrimSuffix(startDir, "/") + "/",
-		"--file-filter=Images | " + strings.Join(pats, " ")}
+		"--file-filter=Images | " + strings.Join(imagePatterns(), " ")}
 }
 
 // ChooseImage implements FileChooser. It returns the chosen path, ErrCancelled
@@ -122,4 +128,52 @@ type FakeChooser struct {
 func (f *FakeChooser) ChooseImage(_ context.Context, startDir string) (string, error) {
 	f.Calls = append(f.Calls, startDir)
 	return f.Path, f.Err
+}
+
+// ErrNoChooser means no file chooser could be opened at all (neither the
+// portal nor zenity); callers explain how to set the wallpaper in
+// config.json instead.
+var ErrNoChooser = errors.New("no file chooser available")
+
+// chooserUnavailable reports whether err means a chooser is not there, as
+// opposed to a dialog that ran or failed.
+func chooserUnavailable(err error) bool {
+	return errors.Is(err, ErrNoPortal) || errors.Is(err, ErrNoZenity) || errors.Is(err, ErrNoChooser)
+}
+
+// FallbackChooser tries Primary and, when it is unavailable, Secondary. A
+// chosen file, ErrCancelled, ctx's end and real failures of Primary are
+// final. When neither is available the error wraps ErrNoChooser.
+type FallbackChooser struct {
+	Primary, Secondary FileChooser
+	// ShouldFallback decides whether Primary's error moves on to Secondary;
+	// nil means errors.Is(err, ErrNoPortal).
+	ShouldFallback func(error) bool
+}
+
+func (f *FallbackChooser) shouldFallback(err error) bool {
+	if f.ShouldFallback != nil {
+		return f.ShouldFallback(err)
+	}
+	return errors.Is(err, ErrNoPortal)
+}
+
+// ChooseImage implements FileChooser.
+func (f *FallbackChooser) ChooseImage(ctx context.Context, startDir string) (string, error) {
+	perr := fmt.Errorf("%w: no primary file chooser", ErrNoPortal)
+	if f.Primary != nil {
+		path, err := f.Primary.ChooseImage(ctx, startDir)
+		if err == nil || errors.Is(err, ErrCancelled) || ctx.Err() != nil || !f.shouldFallback(err) {
+			return path, err
+		}
+		perr = err
+	}
+	if f.Secondary == nil {
+		return "", fmt.Errorf("%w: %w", ErrNoChooser, perr)
+	}
+	path, err := f.Secondary.ChooseImage(ctx, startDir)
+	if err != nil && chooserUnavailable(err) && ctx.Err() == nil {
+		return "", fmt.Errorf("%w: %w; %w", ErrNoChooser, perr, err)
+	}
+	return path, err
 }

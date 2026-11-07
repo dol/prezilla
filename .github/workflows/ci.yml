@@ -20,6 +20,10 @@ jobs:
         run: make lint
 
       - name: Test
+        # The portal chooser tests run a private dbus-daemon; fail instead
+        # of skipping should it ever be missing on the runner.
+        env:
+          PREZILLA_REQUIRE_DBUS_DAEMON: "1"
         run: make test
 
       - name: Build
