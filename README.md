@@ -5,9 +5,10 @@ icons, silences notifications and audio, shows the desktop, and puts everything
 back when you are done. XFCE on X11 first; other desktops are planned.
 
 ## Features
-- Five switches, each saving the original value and restoring it on `off`:
+- Six switches, each saving the original value and restoring it on `off`:
   - `icons`: hides desktop icons
   - `notifications`: enables do-not-disturb in `xfce4-notifyd`
+  - `presentation`: turns on `xfce4-power-manager`'s presentation mode, which also keeps the screensaver and screen blanking off while it is on; it needs `xfce4-power-manager` to be running, and it is why the auto-off timeout matters (an unattended session would otherwise keep the screen awake)
   - `mute`: mutes the default audio sink and later unmutes that same output, even if the default changed meanwhile (only if it was not muted before)
   - `minimize`: shows the desktop (minimizes all windows)
   - `wallpaper`: swaps the wallpaper on every monitor/workspace; off unless `wallpaper` is set in the config to a path to an image file
@@ -16,7 +17,7 @@ back when you are done. XFCE on X11 first; other desktops are planned.
 - When the screensaver starts while a timed session is still running, the tray asks whether to keep presenting
 
 ## Requirements
-- An XFCE session on X11 (Wayland is not supported); `xfconf-query` comes with it
+- An XFCE session on X11 (Wayland is not supported). Prezilla talks to the XFCE settings daemon (`xfconfd`) directly over the D-Bus session bus, so no `xfconf-query` is needed
 - For the tray: a panel with the Status Notifier plugin (the CLI works without it)
 
 Optional: `zenity` for the tray's **About Prezilla** window (the `.deb` and `.rpm` packages recommend it). Without it, About shows a notification instead. No other packages are needed. Mute talks to PulseAudio/PipeWire-pulse over its native protocol, and show-desktop sets the EWMH `_NET_SHOWING_DESKTOP` property directly. The PulseAudio server is found via `PULSE_SERVER` or `$XDG_RUNTIME_DIR/pulse/native`; `default-server` in `client.conf` is not read.
@@ -92,7 +93,7 @@ Exit codes: `0` success, `1` a switch, state or config error (the message goes t
 
 ```json
 {
-  "switches": ["icons", "notifications", "mute", "minimize"],
+  "switches": ["icons", "notifications", "presentation", "mute", "minimize"],
   "timeout_minutes": 30
 }
 ```
@@ -101,7 +102,7 @@ With a wallpaper (setting `wallpaper` adds the `wallpaper` switch automatically)
 
 ```json
 {
-  "switches": ["icons", "notifications", "mute", "minimize", "wallpaper"],
+  "switches": ["icons", "notifications", "presentation", "mute", "minimize", "wallpaper"],
   "wallpaper": "/home/me/Pictures/presenting.png",
   "timeout_minutes": 45
 }
@@ -117,7 +118,7 @@ Errors are printed as a plain sentence with a next step; the technical text foll
   - "Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json."
   - "Couldn't show the desktop: no X display is reachable (Prezilla needs an X11 session). Log in to an X11 session, or remove "minimize" from "switches" in config.json." Wayland sessions are not supported.
   - Restoring: "Couldn't bring your windows back: no X display is reachable (Prezilla needs an X11 session). Run "prezilla off" again in an X11 session." and "Couldn't restore the sound: no PulseAudio or PipeWire server is running. Start your sound server, then run "prezilla off" again."
-  - "Couldn't change desktop icons: xfconf-query was not found. Prezilla needs an XFCE session." (the same for notifications and the wallpaper)
+  - "Couldn't change desktop icons: XFCE's settings service (xfconfd) isn't reachable. Run Prezilla inside an XFCE session, or remove "icons" from "switches" in config.json." (the same for notifications, the power manager's presentation mode and the wallpaper; restoring says "Log in to your XFCE session again, then run "prezilla off" again", and a slow daemon gives "didn't answer in time")
   - "Couldn't change the wallpaper: no image is set. Set "wallpaper" to an image path in config.json, or remove "wallpaper" from "switches"."
 - **"Couldn't save Prezilla's state (<path>). Check free space and permissions, then try again."**: turning presentation mode on could not write its state file; fix the disk or permission problem and try again. A further line may report a switch that could not be rolled back.
 - **"Couldn't start the background timer, so presentation mode might not end by itself. Run "prezilla off" when you are done."**: the background process that ends a timed session could not be started (a tray or an older timer that is still running may end it anyway).
@@ -131,7 +132,7 @@ Errors are printed as a plain sentence with a next step; the technical text foll
 ```bash
 go test ./...
 ```
-Tests never touch the real desktop: icons, notifications and wallpaper use `system.Runner` (`xfconf-query`), mute uses `system.Audio`, minimize uses `system.Windows`, and the tray actions use `system.Notifier`, `system.ScreenSaver` and `system.Prompter` (the About window runs `zenity` through `system.Runner`). Each interface has a fake (for example `system.FakeRunner`, which records command lines and replays canned output) that tests substitute.
+Tests never touch the real desktop: icons, notifications, presentation and wallpaper use `system.Xfconf` (the XFCE settings daemon over D-Bus), mute uses `system.Audio`, minimize uses `system.Windows`, and the tray actions use `system.Notifier`, `system.ScreenSaver` and `system.Prompter` (the About window runs `zenity` through `system.Runner`). Each interface has a fake (for example `system.FakeXfconf`, an in-memory property store that records calls and can inject errors) that tests substitute.
 
 ## Roadmap
 GNOME, KDE, Windows and macOS backends are planned.

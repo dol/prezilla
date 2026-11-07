@@ -6,9 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- `presentation` switch (on by default, after `notifications`): turns on `xfce4-power-manager`'s presentation mode, which also keeps the screensaver and screen blanking off, and restores the previous value (or removes the setting) on `off`. It needs `xfce4-power-manager` to be running.
 - Tray: the Quit item reads "Quit (presentation stays on)" while presentation mode is on, and "Quit" otherwise.
 - Tray: if zenity cannot open its window because the display is dead, About falls back to the notification instead of doing nothing.
-- Plain-language errors: the common failures (no sound server, no X display, missing `xfconf-query`, no wallpaper image, another action running, unreadable saved state, invalid `config.json`, unsupported desktop) are reported as a sentence with a next step (also timeouts of the sound and X servers, a state file that cannot be saved, a deadline timer that cannot be started, and a notification server without buttons); the technical text follows in parentheses on stderr and is left out of the tray tooltip.
+- Plain-language errors: the common failures (no sound server, no X display, unreachable XFCE settings service, no wallpaper image, another action running, unreadable saved state, invalid `config.json`, unsupported desktop) are reported as a sentence with a next step (also timeouts of the sound and X servers, a state file that cannot be saved, a deadline timer that cannot be started, and a notification server without buttons); the technical text follows in parentheses on stderr and is left out of the tray tooltip.
 - `prezilla` CLI: `on`, `off`, `toggle`, `status` and `version`.
 - `prezilla about` prints version, license and website.
 - Tray menu entry "About Prezilla": a small window (via the optional `zenity`) with the project link and a "Close" button; without `zenity`, or if it fails, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity`.
@@ -24,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - GitHub Actions CI and release workflows.
 
 ### Changed
+- Icons, notifications and wallpaper (and the new presentation switch) talk to the XFCE settings daemon (`xfconfd`) directly over the D-Bus session bus instead of running `xfconf-query`, which is no longer needed. A settings service that cannot be reached is reported as a plain sentence with a next step.
 - The product is written "Prezilla" in all user-visible text (About window, tray, notifications, desktop entry); the command, package and paths stay `prezilla`.
 - Tray icons tell the state by shape, not only hue: an outlined grey (`#7A7A7A`) screen while off and a filled green (`#1A9B4A`) screen while presenting, both at least 3:1 against light and dark panels.
 - Tray wording: "N min left" keeps its number and unit together (non-breaking space); the tooltip line while the screensaver question is open reads "Screensaver started. Keep presenting?".
