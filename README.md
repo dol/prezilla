@@ -20,7 +20,7 @@ back when you are done. XFCE on X11 first; other desktops are planned.
 - An XFCE session on X11 (Wayland is not supported). Prezilla talks to the XFCE settings daemon (`xfconfd`) directly over the D-Bus session bus, so no `xfconf-query` is needed
 - For the tray: a panel with the Status Notifier plugin (the CLI works without it)
 
-Optional: `zenity` for the tray's **About Prezilla** window (the `.deb` and `.rpm` packages recommend it). Without it, About shows a notification instead. No other packages are needed. Mute talks to PulseAudio/PipeWire-pulse over its native protocol, and show-desktop sets the EWMH `_NET_SHOWING_DESKTOP` property directly. The PulseAudio server is found via `PULSE_SERVER` or `$XDG_RUNTIME_DIR/pulse/native`; `default-server` in `client.conf` is not read.
+Optional: `zenity` for the tray's **About Prezilla** window (the `.deb` and `.rpm` packages recommend it). Without it, About uses a built-in window. No other packages are needed. Mute talks to PulseAudio/PipeWire-pulse over its native protocol, and show-desktop sets the EWMH `_NET_SHOWING_DESKTOP` property directly. The PulseAudio server is found via `PULSE_SERVER` or `$XDG_RUNTIME_DIR/pulse/native`; `default-server` in `client.conf` is not read.
 
 ## Installation
 
@@ -75,7 +75,7 @@ prezilla version
   - **Presentation mode**, a checkbox that is ticked while the mode is on; clicking it toggles the mode, exactly like a left click on the icon.
   - A greyed-out timer entry such as `Ends 15:04 · 12 min left`, only while a deadline is set, refreshed every 2 seconds; the tooltip keeps `, N min left`.
   - **Reset timer to 30 min**: the end time becomes 30 minutes from now (the configured timeout; 30 minutes when `timeout_minutes` is 0). It does not add to the time left, and a later end time (for example from `on --for 2h`) is kept, so the entry is shown only once at least a minute of the 30 has passed (29 minutes or less are left) and no screensaver question is open. The running watcher picks up the new end time.
-  - **About Prezilla** opens a small window with the version, license, the project link and a **Close** button. The link is meant to open the project page in your default browser through the toolkit's own link handling; this has not been click-tested yet. Clicking About again while the window is open does nothing; Quit closes it. The window is drawn by `zenity`, which since version 4 uses GTK4/libadwaita, so it has the GNOME look rather than your XFCE theme. `zenity` is optional: without it, or if it fails, About shows version, license and the website URL as text in a desktop notification instead, which presentation mode's do-not-disturb may hide while the mode is on.
+  - **About Prezilla** opens a small window with the version, license, the project link and a **Close** button. Clicking About again while the window is open does nothing; Quit closes it. Prezilla tries three things in order. First `zenity` (optional; since version 4 it uses GTK4/libadwaita, so it has the GNOME look rather than your XFCE theme); its link opens through the toolkit's own link handling. If `zenity` is missing or cannot start, Prezilla draws its own small X11 window (light theme, no toolkit and no system fonts needed; scaled to the screen DPI). In it **Close**, Enter, Space and Esc close the window, Tab moves between the link and **Close**, and the link opens with `xdg-open` (http and https only); if no browser can be started the window shows the link as text. Only if there is no X display either, About shows version, license and the website URL as text in a desktop notification, which presentation mode's do-not-disturb may hide while the mode is on. The built-in window was checked on Xvfb with and without a window manager (xfwm4) with synthetic input; opening the link in a real browser has not been click-tested.
   - **Quit** closes the tray icon and leaves presentation mode as it is. While presentation mode is on, its title reads **Quit (presentation stays on)** so the consequence is visible in the menu.
 
   Errors from toggling, **Reset timer** and **About** appear in the tooltip and on stderr.
@@ -132,7 +132,7 @@ Errors are printed as a plain sentence with a next step; the technical text foll
 ```bash
 go test ./...
 ```
-Tests never touch the real desktop: icons, notifications, presentation and wallpaper use `system.Xfconf` (the XFCE settings daemon over D-Bus), mute uses `system.Audio`, minimize uses `system.Windows`, and the tray actions use `system.Notifier`, `system.ScreenSaver` and `system.Prompter` (the About window runs `zenity` through `system.Runner`). Each interface has a fake (for example `system.FakeXfconf`, an in-memory property store that records calls and can inject errors) that tests substitute.
+Tests never touch the real desktop: icons, notifications, presentation and wallpaper use `system.Xfconf` (the XFCE settings daemon over D-Bus), mute uses `system.Audio`, minimize uses `system.Windows`, and the tray actions use `system.Notifier`, `system.ScreenSaver` and `system.Prompter` (the About window runs `zenity` through `system.Runner`, or draws itself through `system.X11About`). Each interface has a fake (for example `system.FakeXfconf`, an in-memory property store that records calls and can inject errors) that tests substitute.
 
 ## Roadmap
 GNOME, KDE, Windows and macOS backends are planned.
