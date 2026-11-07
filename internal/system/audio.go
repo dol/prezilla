@@ -24,6 +24,7 @@ type Backends struct {
 	Runner  Runner
 	Audio   Audio
 	Windows Windows
+	Xfconf  Xfconf
 }
 
 // FakeAudio is an in-memory Audio for tests. Set the exported fields before
