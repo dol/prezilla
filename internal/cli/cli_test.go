@@ -439,3 +439,15 @@ func TestRunOnBoundsEngineContext(t *testing.T) {
 		t.Errorf("deadline %v not within (now, now+%s]", dl, core.OperationTimeout)
 	}
 }
+
+func TestRunAboutPrintsTextAndExitsZero(t *testing.T) {
+	var out, errOut bytes.Buffer
+	d := Deps{Version: "1.2.3"} // no Engine: about must not touch it
+	if c := Run(context.Background(), []string{"about", "extra"}, &out, &errOut, d); c != 0 {
+		t.Fatalf("exit %d, stderr %q", c, errOut.String())
+	}
+	want := "prezilla 1.2.3\nPresentation mode switcher\nLicense: Apache-2.0\nWebsite: https://github.com/dol/prezilla\n"
+	if out.String() != want || errOut.Len() != 0 {
+		t.Fatalf("out %q err %q", out.String(), errOut.String())
+	}
+}

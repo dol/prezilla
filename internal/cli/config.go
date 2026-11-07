@@ -22,3 +22,10 @@ func ResolveConfig(cmd string, cfg core.Config, loadErr error, errOut io.Writer)
 	}
 	return core.Config{}, loadErr
 }
+
+// NeedsDesktop reports whether cmd needs the config and a detected desktop.
+// version and about only print static text, so they work on a broken config
+// and on an unsupported desktop.
+func NeedsDesktop(cmd string) bool {
+	return cmd != "version" && cmd != "about"
+}

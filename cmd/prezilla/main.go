@@ -31,7 +31,7 @@ func run(ctx context.Context) int {
 		PollInterval: 10 * time.Second,
 		Version:      version,
 	}
-	if len(args) > 0 && args[0] == "version" {
+	if len(args) > 0 && !cli.NeedsDesktop(args[0]) {
 		return cli.Run(ctx, args, os.Stdout, os.Stderr, d)
 	}
 

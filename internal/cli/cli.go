@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"prezilla/internal/about"
 	"prezilla/internal/core"
 )
 
@@ -21,7 +22,7 @@ type Deps struct {
 	Version        string
 }
 
-const usage = "usage: prezilla <on [--for DURATION] | off | toggle [--for DURATION] | status | tray | version>"
+const usage = "usage: prezilla <on [--for DURATION] | off | toggle [--for DURATION] | status | tray | about | version>"
 
 // Run executes the command in args and returns the process exit code.
 func Run(ctx context.Context, args []string, out, errOut io.Writer, d Deps) int {
@@ -33,6 +34,9 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer, d Deps) int 
 	switch cmd {
 	case "version":
 		fmt.Fprintln(out, d.Version)
+		return 0
+	case "about":
+		fmt.Fprint(out, about.New(d.Version).Text())
 		return 0
 	case "on", "toggle":
 		opCtx, cancel := detachedOp(ctx)

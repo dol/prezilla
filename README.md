@@ -61,6 +61,7 @@ prezilla off
 prezilla toggle [--for DURATION]
 prezilla status
 prezilla tray
+prezilla about
 prezilla version
 ```
 
@@ -68,6 +69,7 @@ prezilla version
 - `off` restores everything and is a no-op when inactive.
 - `status` prints one of `inactive`, `active` or `active until HH:MM`, and first disables the mode if its deadline has passed.
 - `tray` runs the tray icon until you choose Quit.
+- `about` prints the name, version, description, license and website. Like `version`, it needs no config and works on any desktop.
 - When a deadline is set, `on`/`toggle` and turning the mode on from the tray start a detached `prezilla watch` that restores everything at expiry, even after the tray quits (the tray also checks every 2 seconds).
 
 If `config.json` cannot be read, `on` and `toggle` fail, while `off`, `status` and `tray` print a warning and continue with the default configuration, so a broken config never blocks restoring. `off` restores every saved switch, even one removed from the config since `on`.

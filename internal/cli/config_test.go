@@ -51,3 +51,11 @@ func TestResolveConfigFallbackOrFail(t *testing.T) {
 		}
 	}
 }
+
+func TestNeedsDesktopSkipsVersionAndAbout(t *testing.T) {
+	for cmd, want := range map[string]bool{"version": false, "about": false, "on": true, "off": true, "status": true, "tray": true, "": true} {
+		if got := NeedsDesktop(cmd); got != want {
+			t.Errorf("NeedsDesktop(%q) = %v, want %v", cmd, got, want)
+		}
+	}
+}
