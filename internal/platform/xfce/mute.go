@@ -9,40 +9,36 @@ import (
 	"prezilla/internal/system"
 )
 
-// defaultSinkAlias is pactl's alias for whatever the default sink is now.
+// defaultSinkAlias is the audio server's alias for whatever the default sink
+// is now. It is also the literal name stored in legacy and fallback state.
 const defaultSinkAlias = "@DEFAULT_SINK@"
 
-type mute struct{ r system.Runner }
+type mute struct{ a system.Audio }
 
 // NewMute mutes the default audio sink while presenting and later unmutes
 // that same sink, even if the default output has changed in between.
-func NewMute(r system.Runner) core.Switch { return mute{r} }
+func NewMute(a system.Audio) core.Switch { return mute{a} }
 
 func (mute) ID() string { return core.IDMute }
 
 // Enable saves "<sink name>\t<yes|no>".
 func (s mute) Enable(ctx context.Context) (string, error) {
 	sink := defaultSinkAlias
-	if out, err := s.r.Run(ctx, "env", "LC_ALL=C", "pactl", "get-default-sink"); err == nil {
-		if name := strings.TrimSpace(out); name != "" {
+	if name, err := s.a.DefaultSinkName(ctx); err == nil {
+		if name = strings.TrimSpace(name); name != "" {
 			sink = name
 		}
 	}
-	out, err := s.r.Run(ctx, "env", "LC_ALL=C", "pactl", "get-sink-mute", sink)
+	muted, err := s.a.SinkMuted(ctx, sink)
 	if err != nil {
-		return "", fmt.Errorf("pactl get-sink-mute: %w", err)
+		return "", fmt.Errorf("read sink mute: %w", err)
 	}
-	var was string
-	switch strings.TrimSpace(out) {
-	case "Mute: yes":
+	if err := s.a.SetSinkMute(ctx, sink, true); err != nil {
+		return "", fmt.Errorf("mute sink: %w", err)
+	}
+	was := "no"
+	if muted {
 		was = "yes"
-	case "Mute: no":
-		was = "no"
-	default:
-		return "", fmt.Errorf("pactl get-sink-mute: unexpected output %q", out)
-	}
-	if _, err := s.r.Run(ctx, "pactl", "set-sink-mute", sink, "1"); err != nil {
-		return "", fmt.Errorf("pactl set-sink-mute: %w", err)
 	}
 	return sink + "\t" + was, nil
 }
@@ -55,32 +51,18 @@ func (s mute) Disable(ctx context.Context, saved string) error {
 	if !ok {
 		sink, was = defaultSinkAlias, saved
 	}
-	if was != "no" {
+	if was != "no" || sink == "" {
 		return nil
 	}
-	if sink != defaultSinkAlias && !s.sinkExists(ctx, sink) {
-		return nil
-	}
-	if _, err := s.r.Run(ctx, "pactl", "set-sink-mute", sink, "0"); err != nil {
-		return fmt.Errorf("pactl set-sink-mute: %w", err)
-	}
-	return nil
-}
-
-// sinkExists reports whether name is a whole tab-separated field of a
-// "pactl list short sinks" line. If the list cannot be read it assumes the
-// sink exists, so the unmute is still attempted and any failure reported.
-func (s mute) sinkExists(ctx context.Context, name string) bool {
-	out, err := s.r.Run(ctx, "pactl", "list", "short", "sinks")
-	if err != nil {
-		return true
-	}
-	for _, line := range strings.Split(out, "\n") {
-		for _, field := range strings.Split(line, "\t") {
-			if strings.TrimSpace(field) == name {
-				return true
-			}
+	// If the sink list cannot be read, assume the sink exists so the unmute
+	// is still attempted and any failure reported.
+	if sink != defaultSinkAlias {
+		if exists, err := s.a.SinkExists(ctx, sink); err == nil && !exists {
+			return nil
 		}
 	}
-	return false
+	if err := s.a.SetSinkMute(ctx, sink, false); err != nil {
+		return fmt.Errorf("unmute sink: %w", err)
+	}
+	return nil
 }

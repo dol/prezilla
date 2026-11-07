@@ -38,7 +38,7 @@ func TestDetectUnsupportedNamesValue(t *testing.T) {
 
 func TestSwitchesRespectsConfigOrderAndIgnoresUnknown(t *testing.T) {
 	cfg := core.Config{Switches: []string{core.IDMute, "bogus", core.IDIcons, core.IDNotifications}}
-	sws, err := Switches("xfce", &system.FakeRunner{}, cfg)
+	sws, err := Switches("xfce", system.Backends{Runner: &system.FakeRunner{}, Audio: &system.FakeAudio{}}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,14 +49,14 @@ func TestSwitchesRespectsConfigOrderAndIgnoresUnknown(t *testing.T) {
 	if got := strings.Join(ids, ","); got != "mute,icons,notifications" {
 		t.Errorf("ids = %s", got)
 	}
-	if _, err := Switches("gnome", &system.FakeRunner{}, cfg); err == nil {
+	if _, err := Switches("gnome", system.Backends{Runner: &system.FakeRunner{}, Audio: &system.FakeAudio{}}, cfg); err == nil {
 		t.Error("expected error for unknown desktop")
 	}
 }
 
 func TestAllSwitchesReturnsEveryKnownSwitchInFixedOrder(t *testing.T) {
 	cfg := core.Config{Switches: []string{core.IDMute}}
-	sws, err := AllSwitches("xfce", &system.FakeRunner{}, cfg)
+	sws, err := AllSwitches("xfce", system.Backends{Runner: &system.FakeRunner{}, Audio: &system.FakeAudio{}}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestAllSwitchesReturnsEveryKnownSwitchInFixedOrder(t *testing.T) {
 	if got := strings.Join(ids, ","); got != "icons,notifications,mute,minimize,wallpaper" {
 		t.Errorf("ids = %s", got)
 	}
-	if _, err := AllSwitches("gnome", &system.FakeRunner{}, cfg); err == nil {
+	if _, err := AllSwitches("gnome", system.Backends{Runner: &system.FakeRunner{}, Audio: &system.FakeAudio{}}, cfg); err == nil {
 		t.Error("expected error for unknown desktop")
 	}
 }

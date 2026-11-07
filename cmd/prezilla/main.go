@@ -49,12 +49,13 @@ func run(ctx context.Context) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	switches, err := platform.Switches(desktop, system.ExecRunner{}, cfg)
+	backends := system.Backends{Runner: system.ExecRunner{}, Audio: system.PulseAudio{}}
+	switches, err := platform.Switches(desktop, backends, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	all, err := platform.AllSwitches(desktop, system.ExecRunner{}, cfg)
+	all, err := platform.AllSwitches(desktop, backends, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

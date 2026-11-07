@@ -8,20 +8,20 @@ import (
 
 // Switches builds the switches listed in cfg.Switches, in config order.
 // Unknown IDs are ignored.
-func Switches(r system.Runner, cfg core.Config) []core.Switch {
+func Switches(b system.Backends, cfg core.Config) []core.Switch {
 	var out []core.Switch
 	for _, id := range cfg.Switches {
 		switch id {
 		case core.IDIcons:
-			out = append(out, NewIcons(r))
+			out = append(out, NewIcons(b.Runner))
 		case core.IDNotifications:
-			out = append(out, NewNotifications(r))
+			out = append(out, NewNotifications(b.Runner))
 		case core.IDMute:
-			out = append(out, NewMute(r))
+			out = append(out, NewMute(b.Audio))
 		case core.IDMinimize:
-			out = append(out, NewMinimize(r))
+			out = append(out, NewMinimize(b.Runner))
 		case core.IDWallpaper:
-			out = append(out, NewWallpaper(r, cfg.Wallpaper))
+			out = append(out, NewWallpaper(b.Runner, cfg.Wallpaper))
 		}
 	}
 	return out
@@ -30,12 +30,12 @@ func Switches(r system.Runner, cfg core.Config) []core.Switch {
 // All builds every known switch in a fixed order (icons, notifications, mute,
 // minimize, wallpaper). The wallpaper switch uses cfg.Wallpaper; its Disable
 // restores from the saved value and does not need the image.
-func All(r system.Runner, cfg core.Config) []core.Switch {
+func All(b system.Backends, cfg core.Config) []core.Switch {
 	return []core.Switch{
-		NewIcons(r),
-		NewNotifications(r),
-		NewMute(r),
-		NewMinimize(r),
-		NewWallpaper(r, cfg.Wallpaper),
+		NewIcons(b.Runner),
+		NewNotifications(b.Runner),
+		NewMute(b.Audio),
+		NewMinimize(b.Runner),
+		NewWallpaper(b.Runner, cfg.Wallpaper),
 	}
 }

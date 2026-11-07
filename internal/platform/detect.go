@@ -22,20 +22,20 @@ func Detect(getenv func(string) string) (string, error) {
 }
 
 // Switches builds the switches for desktop as configured in cfg.
-func Switches(desktop string, r system.Runner, cfg core.Config) ([]core.Switch, error) {
+func Switches(desktop string, b system.Backends, cfg core.Config) ([]core.Switch, error) {
 	switch desktop {
 	case "xfce":
-		return xfce.Switches(r, cfg), nil
+		return xfce.Switches(b, cfg), nil
 	}
 	return nil, fmt.Errorf("unsupported desktop %q", desktop)
 }
 
 // AllSwitches builds every known switch for desktop, used to restore saved
 // entries whose switch is no longer in the config.
-func AllSwitches(desktop string, r system.Runner, cfg core.Config) ([]core.Switch, error) {
+func AllSwitches(desktop string, b system.Backends, cfg core.Config) ([]core.Switch, error) {
 	switch desktop {
 	case "xfce":
-		return xfce.All(r, cfg), nil
+		return xfce.All(b, cfg), nil
 	}
 	return nil, fmt.Errorf("unsupported desktop %q", desktop)
 }
