@@ -222,6 +222,7 @@ func (c *promptCoordinator) finish(ctx, pctx context.Context, gen uint64, key st
 // resolveLocked ends the pending question and cancels its notification.
 func (c *promptCoordinator) resolveLocked() {
 	c.waiting = false
+	c.err = "" // a notification error belongs to the question it came from
 	if c.cancel != nil {
 		c.cancel()
 		c.cancel = nil

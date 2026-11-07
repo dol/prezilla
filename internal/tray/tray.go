@@ -402,6 +402,20 @@ type actionState struct {
 	err string
 }
 
+// clear forgets the last error text.
+func (a *actionState) clear() {
+	a.mu.Lock()
+	a.err = ""
+	a.mu.Unlock()
+}
+
+// sessionEnded reports whether the session went inactive or lost its
+// deadline since the previous refresh; the error texts of the About, Reset
+// and prompt actions are then stale.
+func sessionEnded(wasActive, wasDeadline, active, deadline bool) bool {
+	return wasActive && !active || wasDeadline && !deadline
+}
+
 func (a *actionState) text() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -521,7 +535,8 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	var actions, extendErr actionState
 	var lastExpiryErr, lastStatusErr string
 	var timerShown, resetShown, promptShown bool
-	quitShown := m.Quit.Title // guarded by mu
+	var wasActive, wasDeadline bool // previous refresh, guarded by mu
+	quitShown := m.Quit.Title       // guarded by mu
 
 	refresh := func() {
 		opCtx, opCancel := context.WithTimeout(ctx, core.OperationTimeout)
@@ -546,6 +561,12 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 			return
 		}
 		now := time.Now()
+		hasDeadline := st.Active && !st.ExpiresAt.IsZero()
+		if sessionEnded(wasActive, wasDeadline, st.Active, hasDeadline) {
+			actions.clear()
+			extendErr.clear()
+		}
+		wasActive, wasDeadline = st.Active, hasDeadline
 		coord.check(st, now)
 		prompting := coord.pending()
 		var toggleText string
@@ -577,6 +598,9 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		}
 		if m.Reset.Visible != resetShown {
 			resetShown = m.Reset.Visible
+			if !resetShown {
+				extendErr.clear()
+			}
 			setVisible(resetItem, resetShown)
 		}
 		if m.Keep.Visible != promptShown {

@@ -782,3 +782,34 @@ func TestNoteExpiryResetsWhenCleared(t *testing.T) {
 		t.Error("an error that came back after clearing must print again")
 	}
 }
+
+func TestActionStateClear(t *testing.T) {
+	var a actionState
+	a.run(context.Background(), func(context.Context) error { return errors.New("boom") }, func() {})
+	if a.text() != "boom" {
+		t.Fatalf("text %q", a.text())
+	}
+	a.clear()
+	if a.text() != "" {
+		t.Errorf("not cleared: %q", a.text())
+	}
+}
+
+func TestSessionEnded(t *testing.T) {
+	for _, c := range []struct {
+		name                          string
+		wasActive, wasDeadline        bool
+		active, deadline, wantCleared bool
+	}{
+		{"still running", true, true, true, true, false},
+		{"turned inactive", true, true, false, false, true},
+		{"inactive without deadline", true, false, false, false, true},
+		{"deadline disappeared", true, true, true, false, true},
+		{"was idle", false, false, false, false, false},
+		{"just started", false, false, true, true, false},
+	} {
+		if got := sessionEnded(c.wasActive, c.wasDeadline, c.active, c.deadline); got != c.wantCleared {
+			t.Errorf("%s: got %v", c.name, got)
+		}
+	}
+}

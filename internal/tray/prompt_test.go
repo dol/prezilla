@@ -598,3 +598,15 @@ func TestContinueStep(t *testing.T) {
 		}
 	}
 }
+
+// A tooltip error from the notification must not outlive the question.
+func TestCoordinatorErrorClearsWhenQuestionResolves(t *testing.T) {
+	p := &system.FakePrompter{Err: errors.New("notify: server does not support actions")}
+	f := newFixture(t, p)
+	f.ss.Emit(true)
+	eventually(t, "error", func() bool { return f.c.errText() != "" })
+	f.c.check(core.State{}, f.now) // session ended: the question is withdrawn
+	if got := f.c.errText(); got != "" {
+		t.Errorf("stale error %q", got)
+	}
+}
