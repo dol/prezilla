@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - Tray: a tick box per switch (Hide desktop icons, Disable notifications, Keep screen awake, Mute sound, Minimize windows, Change wallpaper). Changes apply at once, also while presentation mode is on, and are saved to `config.json`; unknown keys in the file are kept, and a symlinked file stays a symlink with its permissions.
-- Tray: "Choose wallpaper…" picks the wallpaper image with a `zenity` file chooser (without `zenity`, a notification explains how to set `wallpaper` in `config.json`). Choosing an image while presenting applies it at once.
+- Tray: "Choose wallpaper…" picks the wallpaper image with a file chooser (without one, a notification explains how to set `wallpaper` in `config.json`). Choosing an image while presenting applies it at once.
 - Error sentences for a wallpaper image that no longer exists, a chosen file that is missing or not an image, a file chooser that cannot start, a `config.json` that cannot be saved, and turning presentation mode on with no switch ticked (which now fails with that sentence instead of doing nothing).
 - Tray: About Prezilla shows a built-in X11 window with the logo, version, description, license, project link and a Close button, drawn with embedded fonts (no new runtime dependency); without an X display, a desktop notification is shown instead.
 - `presentation` switch (on by default, after `notifications`): turns on `xfce4-power-manager`'s presentation mode, which also keeps the screensaver and screen blanking off, and restores the previous value (or removes the setting) on `off`. It needs `xfce4-power-manager` to be running.
@@ -28,7 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - GitHub Actions CI and release workflows.
 
 ### Changed
-- About no longer uses `zenity`; it is only used for the wallpaper file chooser.
+- Tray: "Choose wallpaper…" uses the desktop's file chooser portal over D-Bus (for example `xdg-desktop-portal-gtk`), with `zenity` as the fallback. Without either, the notification explains how to set `wallpaper` in `config.json`. The `.deb` and `.rpm` packages also recommend `xdg-desktop-portal-gtk`.
+- About no longer uses `zenity`; it is only used as the fallback wallpaper file chooser.
 - `wallpaper` in `config.json` adds the `wallpaper` switch only when the file has no `switches` key; a `switches` list is used exactly as written. If your file lists `switches` and sets `wallpaper`, add "wallpaper" to `switches` to keep it.
 - Icons, notifications and wallpaper (and the new presentation switch) talk to the XFCE settings daemon (`xfconfd`) directly over the D-Bus session bus instead of running `xfconf-query`, which is no longer needed. A settings service that cannot be reached is reported as a plain sentence with a next step.
 - The product is written "Prezilla" in all user-visible text (About window, tray, notifications, desktop entry); the command, package and paths stay `prezilla`.

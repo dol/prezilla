@@ -8,15 +8,16 @@ description: Toggle presentation mode (icons, notifications, presentation, mute,
 homepage: https://github.com/dol/prezilla
 license: Apache-2.0
 
-# zenity is recommended for the tray's wallpaper file chooser; it is optional:
-# without it a notification explains how to set "wallpaper" in config.json.
+# The tray's wallpaper file chooser uses the desktop's file chooser portal
+# (xdg-desktop-portal-gtk) and falls back to zenity; both are optional:
+# without either a notification explains how to set "wallpaper" in config.json.
 # nfpm has no recommends for archlinux (optdepends are not supported), so the
 # Arch package lists nothing.
 overrides:
   deb:
-    recommends: [zenity]
+    recommends: [zenity, xdg-desktop-portal-gtk]
   rpm:
-    recommends: [zenity]
+    recommends: [zenity, xdg-desktop-portal-gtk]
 
 contents:
   - src: dist/prezilla-linux-amd64
