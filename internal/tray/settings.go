@@ -146,8 +146,10 @@ func (s *settings) ChooseWallpaper(ctx context.Context) error {
 		return err
 	}
 	path, err := s.Chooser.ChooseImage(ctx, s.StartDir)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), core.OperationTimeout)
-	defer cancel()
+	// bounded starts a fresh OperationTimeout budget detached from ctx.
+	bounded := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.WithoutCancel(ctx), core.OperationTimeout)
+	}
 	switch {
 	case errors.Is(err, system.ErrCancelled):
 		return nil
@@ -155,12 +157,18 @@ func (s *settings) ChooseWallpaper(ctx context.Context) error {
 		if s.Notify == nil {
 			return err
 		}
-		return s.Notify(ctx, noZenitySummary, noZenityBody)
+		nctx, cancel := bounded()
+		defer cancel()
+		return s.Notify(nctx, noZenitySummary, noZenityBody)
 	case err != nil:
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// The budget starts once mu is held, so waiting behind a tick change
+	// does not eat it.
+	ctx, cancel := bounded()
+	defer cancel()
 	if err := system.ValidateImage(path); err != nil {
 		return err
 	}

@@ -5,8 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +29,7 @@ func (s fakeSwitch) Disable(context.Context, string) error  { return nil }
 // "enable <id> <image>" or "disable <id>" and, while st.Active, updates
 // st.Saved like the real engine.
 type fakeSettingsEngine struct {
+	mu    sync.Mutex // guards st.Saved, calls and deadlines
 	st    core.State
 	stErr error
 	opErr error
@@ -34,8 +38,37 @@ type fakeSettingsEngine struct {
 	// deadlines records the ctx deadline of each EnableOne/DisableOne call
 	// (zero when there is none).
 	deadlines []time.Time
+
+	// gate, when set, parks the first EnableOne/DisableOne call: it closes
+	// parked once inside, then waits for gate to close.
+	gate     chan struct{}
+	parked   chan struct{}
+	gateOnce sync.Once
+	// inflight counts calls inside EnableOne/DisableOne; maxInflight is the
+	// most seen at once.
+	inflight, maxInflight atomic.Int32
 }
 
+// enter records one engine call entering and parks it at the gate if this
+// is the first; the returned func records it leaving.
+func (f *fakeSettingsEngine) enter() func() {
+	n := f.inflight.Add(1)
+	for {
+		m := f.maxInflight.Load()
+		if n <= m || f.maxInflight.CompareAndSwap(m, n) {
+			break
+		}
+	}
+	if f.gate != nil {
+		f.gateOnce.Do(func() {
+			close(f.parked)
+			<-f.gate
+		})
+	}
+	return func() { f.inflight.Add(-1) }
+}
+
+// noteDeadline must be called with f.mu held.
 func (f *fakeSettingsEngine) noteDeadline(ctx context.Context) {
 	d, _ := ctx.Deadline()
 	f.deadlines = append(f.deadlines, d)
@@ -44,6 +77,9 @@ func (f *fakeSettingsEngine) noteDeadline(ctx context.Context) {
 func (f *fakeSettingsEngine) Status() (core.State, error) { return f.st, f.stErr }
 
 func (f *fakeSettingsEngine) EnableOne(ctx context.Context, sw core.Switch) (bool, error) {
+	defer f.enter()()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.noteDeadline(ctx)
 	img := ""
 	if fs, ok := sw.(fakeSwitch); ok {
@@ -64,6 +100,9 @@ func (f *fakeSettingsEngine) EnableOne(ctx context.Context, sw core.Switch) (boo
 }
 
 func (f *fakeSettingsEngine) DisableOne(ctx context.Context, id string) (bool, error) {
+	defer f.enter()()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.noteDeadline(ctx)
 	f.calls = append(f.calls, "disable "+id)
 	if f.ended || !f.st.Active {
@@ -632,5 +671,58 @@ func TestSetTickNotBlockedWhileChooserOpen(t *testing.T) {
 	<-done
 	if cfg := f.config(t); !cfg.Has(core.IDMute) {
 		t.Errorf("mute not saved: %+v", cfg)
+	}
+}
+
+func TestSettingsMutexSerialisesChooseWallpaperAndSetTick(t *testing.T) {
+	f := newSettingsFixture(t)
+	f.writeConfig(t, `{"switches": ["icons", "wallpaper"]}`)
+	f.activate("icons")
+	img := f.image(t, "new.png")
+	f.chooser.Path = img
+	f.eng.gate = make(chan struct{})
+	f.eng.parked = make(chan struct{})
+
+	chooseDone := make(chan error, 1)
+	go func() { chooseDone <- f.s.ChooseWallpaper(context.Background()) }()
+	<-f.eng.parked // ChooseWallpaper is inside DisableOne, holding the settings mutex
+
+	tickDone := make(chan error, 1)
+	go func() { tickDone <- f.s.SetTick(context.Background(), core.IDMute, true) }()
+	// Give SetTick a bounded chance to reach the engine: without the mutex
+	// it enters EnableOne while the first call is still parked.
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); {
+		if f.eng.inflight.Load() > 1 {
+			break
+		}
+		runtime.Gosched()
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case err := <-tickDone:
+		t.Errorf("SetTick finished (err %v) while ChooseWallpaper held the engine call", err)
+	default:
+	}
+	close(f.eng.gate)
+	if err := <-chooseDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-tickDone; err != nil {
+		t.Fatal(err)
+	}
+
+	if got := f.eng.maxInflight.Load(); got != 1 {
+		t.Errorf("max concurrent engine calls = %d, want 1", got)
+	}
+	// SetTick ran after the choice was saved, so it read the new image.
+	f.eng.mu.Lock()
+	calls := slices.Clone(f.eng.calls)
+	f.eng.mu.Unlock()
+	if want := []string{"disable wallpaper", "enable wallpaper " + img, "enable mute " + img}; !slices.Equal(calls, want) {
+		t.Errorf("calls %v, want %v", calls, want)
+	}
+	cfg := f.config(t)
+	if want := []string{"icons", "mute", "wallpaper"}; cfg.Wallpaper != img || !slices.Equal(cfg.Switches, want) {
+		t.Errorf("config %+v, want wallpaper %q and switches %v", cfg, img, want)
 	}
 }
