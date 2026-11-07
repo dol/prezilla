@@ -136,3 +136,115 @@ func TestMuteEmptyOutputFailsClosed(t *testing.T) {
 	}
 	lacks(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 1")
 }
+
+const wmGet = "env LC_ALL=C wmctrl -m"
+
+func TestMinimizeEnableShowsDesktopAndSavesState(t *testing.T) {
+	f := &system.FakeRunner{Out: map[string]string{wmGet: "Name: Xfwm4\nShowing the desktop: OFF"}}
+	sw := NewMinimize(f)
+	saved, err := sw.Enable(ctx)
+	if err != nil || saved != "off" {
+		t.Fatalf("got (%q, %v)", saved, err)
+	}
+	has(t, f, "wmctrl -k on")
+	if err := sw.Disable(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, "wmctrl -k off")
+}
+
+func TestMinimizeAlreadyShowingDesktopNotRestored(t *testing.T) {
+	f := &system.FakeRunner{Out: map[string]string{wmGet: "Name: Xfwm4\nShowing the desktop: ON"}}
+	sw := NewMinimize(f)
+	saved, err := sw.Enable(ctx)
+	if err != nil || saved != "on" {
+		t.Fatalf("got (%q, %v)", saved, err)
+	}
+	if err := sw.Disable(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, f, "wmctrl -k off")
+}
+
+func TestMinimizeMissingWmctrlErrorMentionsTool(t *testing.T) {
+	f := &system.FakeRunner{Err: map[string]error{wmGet: errors.New("not found")}}
+	_, err := NewMinimize(f).Enable(ctx)
+	if err == nil || !strings.Contains(err.Error(), "wmctrl") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestMinimizeUnparsableOutputFailsClosed(t *testing.T) {
+	f := &system.FakeRunner{Out: map[string]string{wmGet: "Name: Xfwm4\nDesktop zeigen: AN"}}
+	_, err := NewMinimize(f).Enable(ctx)
+	if err == nil || !strings.Contains(err.Error(), "wmctrl -m") {
+		t.Fatalf("got %v", err)
+	}
+	lacks(t, f, "wmctrl -k on")
+}
+
+const (
+	wpList = "xfconf-query -c xfce4-desktop -l"
+	wpA    = "/backdrop/screen0/monitor0/workspace0/last-image"
+	wpB    = "/backdrop/screen0/monitor1/workspace0/last-image"
+	wpGet  = "xfconf-query -c xfce4-desktop -p "
+)
+
+func wpFake() *system.FakeRunner {
+	return &system.FakeRunner{Out: map[string]string{
+		wpList:      wpA + "\n" + wpB + "\n/desktop-icons/style",
+		wpGet + wpA: "/img/a.png",
+		wpGet + wpB: "/img/b.png",
+	}}
+}
+
+func TestWallpaperChangesEveryMonitorAndWorkspaceProperty(t *testing.T) {
+	f := wpFake()
+	saved, err := NewWallpaper(f, "/img/pres.png").Enable(ctx)
+	if err != nil || saved == "" {
+		t.Fatalf("got (%q, %v)", saved, err)
+	}
+	has(t, f, wpGet+wpA+" -s /img/pres.png")
+	has(t, f, wpGet+wpB+" -s /img/pres.png")
+	lacks(t, f, wpGet+"/desktop-icons/style -s /img/pres.png")
+}
+
+func TestWallpaperDisableRestoresEachOriginal(t *testing.T) {
+	f := wpFake()
+	sw := NewWallpaper(f, "/img/pres.png")
+	saved, err := sw.Enable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Disable(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	has(t, f, wpGet+wpA+" -s /img/a.png")
+	has(t, f, wpGet+wpB+" -s /img/b.png")
+}
+
+func TestWallpaperDisableContinuesAfterFailure(t *testing.T) {
+	f := wpFake()
+	sw := NewWallpaper(f, "/img/pres.png")
+	saved, _ := sw.Enable(ctx)
+	f.Err = map[string]error{wpGet + wpA + " -s /img/a.png": errors.New("boom")}
+	err := sw.Disable(ctx, saved)
+	if err == nil || !strings.Contains(err.Error(), wpA) {
+		t.Fatalf("got %v", err)
+	}
+	has(t, f, wpGet+wpB+" -s /img/b.png")
+}
+
+func TestWallpaperDisableBadSavedErrors(t *testing.T) {
+	if err := NewWallpaper(&system.FakeRunner{}, "x").Disable(ctx, "not json"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestWallpaperNoPropertiesErrors(t *testing.T) {
+	f := &system.FakeRunner{Out: map[string]string{wpList: "/desktop-icons/style"}}
+	_, err := NewWallpaper(f, "x").Enable(ctx)
+	if err == nil || !strings.Contains(err.Error(), "no wallpaper properties found") {
+		t.Fatalf("got %v", err)
+	}
+}
