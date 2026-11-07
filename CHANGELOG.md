@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Tray: a tick box per switch (Hide desktop icons, Disable notifications, Keep screen awake, Mute sound, Minimize windows, Change wallpaper). Changes apply at once, also while presentation mode is on, and are saved to `config.json`; unknown keys in the file are kept.
+- Tray: "Choose wallpaper…" picks the wallpaper image with a `zenity` file chooser (without `zenity`, a notification explains how to set `wallpaper` in `config.json`). Choosing an image while presenting applies it at once.
+- Error sentences for a wallpaper image that no longer exists and for a `config.json` that cannot be saved.
 - Tray: without `zenity` (or when it cannot start), About Prezilla shows a built-in X11 window with the project link and a Close button, drawn with embedded fonts (no new runtime dependency); the notification is now the last fallback, used only when there is no X display.
 - `presentation` switch (on by default, after `notifications`): turns on `xfce4-power-manager`'s presentation mode, which also keeps the screensaver and screen blanking off, and restores the previous value (or removes the setting) on `off`. It needs `xfce4-power-manager` to be running.
 - Tray: the Quit item reads "Quit (presentation stays on)" while presentation mode is on, and "Quit" otherwise.
@@ -26,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - GitHub Actions CI and release workflows.
 
 ### Changed
+- `wallpaper` in `config.json` adds the `wallpaper` switch only when the file has no `switches` key; a `switches` list is used exactly as written.
 - Icons, notifications and wallpaper (and the new presentation switch) talk to the XFCE settings daemon (`xfconfd`) directly over the D-Bus session bus instead of running `xfconf-query`, which is no longer needed. A settings service that cannot be reached is reported as a plain sentence with a next step.
 - The product is written "Prezilla" in all user-visible text (About window, tray, notifications, desktop entry); the command, package and paths stay `prezilla`.
 - Tray icons tell the state by shape, not only hue: an outlined grey (`#7A7A7A`) screen while off and a filled green (`#1A9B4A`) screen while presenting, both at least 3:1 against light and dark panels.

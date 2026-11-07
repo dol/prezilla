@@ -27,6 +27,8 @@ cp packaging/prezilla.desktop ~/.config/autostart/
 
 Run `prezilla tray`, then tick **Presentation mode** in the tray menu to turn the mode on or off.
 
+Below it, the menu has a tick box for each switch. A ticked switch is part of presentation mode. Changes apply at once, even while you present, and are saved to `config.json`. **Choose wallpaper…** picks the image for the `wallpaper` switch and needs `zenity` to open the file chooser.
+
 The same actions are available from a terminal or a keyboard shortcut:
 
 ```bash
@@ -67,7 +69,7 @@ Prezilla reads `~/.config/prezilla/config.json`. Every key is optional:
 }
 ```
 
-Setting `wallpaper` adds the `wallpaper` switch. Setting `timeout_minutes` to `0` removes the timer.
+The tray menu writes `switches` and `wallpaper` for you. In a file without a `switches` key, setting `wallpaper` adds the `wallpaper` switch. Setting `timeout_minutes` to `0` removes the timer.
 
 ## Troubleshooting
 
