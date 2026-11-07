@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=prezilla
+Exec=prezilla tray
+X-GNOME-Autostart-enabled=true
+Icon=prezilla
+Terminal=false

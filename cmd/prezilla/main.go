@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +13,7 @@ import (
 	"prezilla/internal/core"
 	"prezilla/internal/platform"
 	"prezilla/internal/system"
+	"prezilla/internal/tray"
 )
 
 var version = "dev"
@@ -27,8 +27,6 @@ func main() {
 func run(ctx context.Context) int {
 	args := os.Args[1:]
 	d := cli.Deps{
-		// Replaced by the real tray in a later task.
-		Tray:         func(context.Context) error { return errors.New("tray not built yet") },
 		SpawnWatcher: spawnWatcher,
 		PollInterval: 10 * time.Second,
 		Version:      version,
@@ -54,6 +52,7 @@ func run(ctx context.Context) int {
 	}
 	d.Engine = core.NewEngine(switches, core.NewStore(core.DefaultStatePath()), time.Now)
 	d.DefaultTimeout = cfg.Timeout()
+	d.Tray = func(ctx context.Context) error { return tray.Run(ctx, d.Engine, cfg.Timeout()) }
 	return cli.Run(ctx, args, os.Stdout, os.Stderr, d)
 }
 
