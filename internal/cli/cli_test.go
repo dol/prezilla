@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -162,8 +164,28 @@ func TestRunEngineErrorExits1AndPrintsToStderr(t *testing.T) {
 	if c := h.run("on"); c != 1 {
 		t.Errorf("code %d", c)
 	}
-	if !strings.Contains(h.errOut.String(), "icons") || !strings.Contains(h.errOut.String(), "boom") {
-		t.Errorf("stderr %q", h.errOut.String())
+	// An unmapped error keeps its original text.
+	if got := h.errOut.String(); got != "icons: boom\n" {
+		t.Errorf("stderr %q", got)
+	}
+	if h.out.Len() != 0 {
+		t.Errorf("stdout %q", h.out.String())
+	}
+}
+
+func TestRunMappedEngineErrorPrintsExplainedText(t *testing.T) {
+	h := newHarness(t)
+	h.sw.err = fmt.Errorf("xfconf-query: %w", exec.ErrNotFound)
+	if c := h.run("on"); c != 1 {
+		t.Errorf("code %d", c)
+	}
+	want := "Couldn't change desktop icons: xfconf-query was not found. Prezilla needs an XFCE session." +
+		" (details: icons: xfconf-query: " + exec.ErrNotFound.Error() + ")\n"
+	if got := h.errOut.String(); got != want {
+		t.Errorf("stderr %q\nwant %q", got, want)
+	}
+	if h.out.Len() != 0 {
+		t.Errorf("stdout %q", h.out.String())
 	}
 }
 

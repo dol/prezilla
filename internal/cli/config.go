@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"prezilla/internal/core"
+	"prezilla/internal/usererr"
 )
 
 // ResolveConfig decides what to do when loading the config for cmd failed
@@ -17,7 +18,7 @@ func ResolveConfig(cmd string, cfg core.Config, loadErr error, errOut io.Writer)
 	}
 	switch cmd {
 	case "off", "status", "watch", "tray":
-		fmt.Fprintf(errOut, "warning: %v; using default configuration\n", loadErr)
+		fmt.Fprintf(errOut, "warning: %s; using default configuration\n", usererr.Explain(loadErr))
 		return core.DefaultConfig(), nil
 	}
 	return core.Config{}, loadErr

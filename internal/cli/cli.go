@@ -10,6 +10,7 @@ import (
 
 	"prezilla/internal/about"
 	"prezilla/internal/core"
+	"prezilla/internal/usererr"
 )
 
 // Deps are the injected collaborators of the CLI.
@@ -83,11 +84,11 @@ func disableIfExpired(ctx context.Context, d Deps) (bool, error) {
 // the tray then exits for lack of a host. Errors are reported, not fatal.
 func prepareTray(ctx context.Context, errOut io.Writer, d Deps) {
 	if _, err := disableIfExpired(ctx, d); err != nil {
-		fmt.Fprintln(errOut, err)
+		fmt.Fprintln(errOut, usererr.Explain(err))
 	}
 	st, err := d.Engine.Status()
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		fmt.Fprintln(errOut, usererr.Explain(err))
 		return
 	}
 	if st.Active && !st.ExpiresAt.IsZero() && d.SpawnWatcher != nil {
@@ -98,7 +99,7 @@ func prepareTray(ctx context.Context, errOut io.Writer, d Deps) {
 }
 
 func fail(errOut io.Writer, err error) int {
-	fmt.Fprintln(errOut, err)
+	fmt.Fprintln(errOut, usererr.Explain(err))
 	return 1
 }
 
@@ -132,11 +133,11 @@ func runEnable(ctx context.Context, cmd string, args []string, errOut io.Writer,
 	}
 	code := 0
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		fmt.Fprintln(errOut, usererr.Explain(err))
 		code = 1
 	}
 	if st, serr := d.Engine.Status(); serr != nil {
-		fmt.Fprintln(errOut, serr)
+		fmt.Fprintln(errOut, usererr.Explain(serr))
 		code = 1
 	} else if st.Active && !st.ExpiresAt.IsZero() && d.SpawnWatcher != nil {
 		if werr := d.SpawnWatcher(); werr != nil {
@@ -178,7 +179,7 @@ func runWatch(ctx context.Context, errOut io.Writer, d Deps) int {
 			return 0
 		}
 		if _, err := disableIfExpired(ctx, d); err != nil {
-			fmt.Fprintln(errOut, err)
+			fmt.Fprintln(errOut, usererr.Explain(err))
 		}
 		select {
 		case <-ctx.Done():

@@ -18,6 +18,7 @@ import (
 	"prezilla/internal/core"
 	"prezilla/internal/system"
 	"prezilla/internal/tray/icons"
+	"prezilla/internal/usererr"
 )
 
 const (
@@ -345,6 +346,21 @@ func (s *aboutShower) wait() {
 	s.busy.Unlock() //nolint:staticcheck // empty critical section is the point
 }
 
+// expiryNote is what one refresh does with the expiry error.
+type expiryNote struct {
+	explained string // stderr text; the de-duplication key
+	short     string // tooltip text
+	print     bool   // true when explained is new and non-empty
+}
+
+// noteExpiry converts the expiry error and decides whether it still has to be
+// printed: the same explained text is printed only once until it changes.
+func noteExpiry(prev string, err error) expiryNote {
+	n := expiryNote{explained: usererr.Explain(err), short: usererr.Short(err)}
+	n.print = n.explained != "" && n.explained != prev
+	return n
+}
+
 // joinErrText joins two non-empty error texts with "; ".
 func joinErrText(a, b string) string {
 	switch {
@@ -375,11 +391,11 @@ func (a *actionState) run(ctx context.Context, fn func(context.Context) error, d
 	a.mu.Lock()
 	a.err = ""
 	if err != nil {
-		a.err = err.Error()
+		a.err = usererr.Short(err)
 	}
 	a.mu.Unlock()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 	}
 	done()
 }
@@ -421,7 +437,7 @@ func Run(ctx context.Context, cfg Config) error {
 	go func() {
 		defer close(watchDone)
 		if err := coord.watch(ctx, cfg.ScreenSaver); err != nil && ctx.Err() == nil {
-			fmt.Fprintln(os.Stderr, err) // once; the tray carries on without the prompt
+			fmt.Fprintln(os.Stderr, usererr.Explain(err)) // once; the tray carries on without the prompt
 		}
 	}()
 	// Set before systray.Run: the library reads it when it exports the item
@@ -489,19 +505,15 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		st, err := e.Status()
 		mu.Lock()
 		defer mu.Unlock()
-		expText := ""
-		if expErr != nil {
-			expText = expErr.Error()
-		}
-		if expText != lastExpiryErr {
-			lastExpiryErr = expText
-			if expText != "" {
-				fmt.Fprintln(os.Stderr, expErr)
-			}
+		note := noteExpiry(lastExpiryErr, expErr)
+		lastExpiryErr = note.explained
+		expText := note.short
+		if note.print {
+			fmt.Fprintln(os.Stderr, note.explained)
 		}
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			systray.SetTooltip("Prezilla: " + err.Error())
+			fmt.Fprintln(os.Stderr, usererr.Explain(err))
+			systray.SetTooltip("Prezilla: " + usererr.Short(err))
 			return
 		}
 		now := time.Now()
@@ -509,7 +521,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		prompting := coord.pending()
 		var toggleText string
 		if lastErr != nil {
-			toggleText = lastErr.Error()
+			toggleText = usererr.Short(lastErr)
 		}
 		remaining, timer := "", ""
 		if st.Active {
@@ -565,7 +577,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 			lastErr = err
 			mu.Unlock()
 			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
+				fmt.Fprintln(os.Stderr, usererr.Explain(err))
 			}
 			refresh()
 		})

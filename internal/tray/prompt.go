@@ -11,6 +11,7 @@ import (
 	"prezilla/internal/about"
 	"prezilla/internal/core"
 	"prezilla/internal/system"
+	"prezilla/internal/usererr"
 )
 
 const (
@@ -201,14 +202,14 @@ func (c *promptCoordinator) finish(ctx, pctx context.Context, gen uint64, key st
 		// the question stays open through the menu items, with no tooltip
 		// error. Only a stderr line records it.
 		c.mu.Unlock()
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 		return
 	}
 	if err != nil {
 		// The notification failed; the menu items stay as the fallback.
-		c.err = err.Error()
+		c.err = usererr.Short(err)
 		c.mu.Unlock()
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 		c.d.changed()
 		return
 	}
@@ -275,11 +276,11 @@ func (c *promptCoordinator) apply(ctx context.Context, key string) {
 	c.mu.Lock()
 	c.err = ""
 	if err != nil {
-		c.err = err.Error()
+		c.err = usererr.Short(err)
 	}
 	c.mu.Unlock()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 	}
 	c.d.changed()
 }

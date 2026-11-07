@@ -40,7 +40,8 @@ func TestResolveConfigFallbackOrFail(t *testing.T) {
 			if err != nil || !slices.Equal(cfg.Switches, core.DefaultConfig().Switches) || cfg.TimeoutMinutes != core.DefaultConfig().TimeoutMinutes {
 				t.Errorf("%s: cfg=%+v err=%v, want defaults", c.cmd, cfg, err)
 			}
-			want := "warning: " + broken.Error() + "; using default configuration\n"
+			want := "warning: The configuration file (/x/config.json) isn't valid JSON. Fix it, or delete it to use the defaults." +
+				" (details: " + broken.Error() + "); using default configuration\n"
 			if errOut.String() != want {
 				t.Errorf("%s: stderr %q want %q", c.cmd, errOut.String(), want)
 			}

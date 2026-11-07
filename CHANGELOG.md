@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Plain-language errors: the common failures (no sound server, no X display, missing `xfconf-query`, no wallpaper image, another action running, unreadable saved state, invalid `config.json`, unsupported desktop) are reported as a sentence with a next step; the technical text follows in parentheses on stderr and is left out of the tray tooltip.
 - `prezilla` CLI: `on`, `off`, `toggle`, `status` and `version`.
 - `prezilla about` prints version, license and website.
 - Tray menu entry "About Prezilla": a small window (via the optional `zenity`) with the project link and a "Close" button; without `zenity`, or if it fails, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity`.

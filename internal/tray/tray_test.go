@@ -15,6 +15,7 @@ import (
 	"prezilla/internal/core"
 	"prezilla/internal/system"
 	"prezilla/internal/tray/icons"
+	"prezilla/internal/usererr"
 )
 
 func TestLabelsActiveAndInactive(t *testing.T) {
@@ -699,5 +700,50 @@ func TestNoHostErrorKeepsLowercaseCommand(t *testing.T) {
 	want := `use "prezilla toggle" from the command line`
 	if !strings.Contains(errNoHost.Error(), want) {
 		t.Fatalf("errNoHost = %q, want it to contain %q", errNoHost, want)
+	}
+}
+
+func TestTooltipUsesShortSentencesWithoutDetails(t *testing.T) {
+	err := errors.Join(
+		fmt.Errorf("mute: %w", errors.New("pulse: connect: refused")),
+		errors.New("boom"),
+	)
+	got := tooltip(true, "", usererr.Short(err), "", false)
+	want := "Prezilla: presentation mode on (error: " +
+		`Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json.; boom)`
+	if got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+	if strings.Contains(got, "details:") || strings.Contains(got, "pulse: connect") {
+		t.Errorf("tooltip leaks technical text: %q", got)
+	}
+}
+
+func TestActionStateKeepsShortTextForTooltip(t *testing.T) {
+	var a actionState
+	a.run(context.Background(), func(context.Context) error {
+		return fmt.Errorf("minimize: %w", errors.New("x11: connect: no display"))
+	}, func() {})
+	if got := a.text(); strings.Contains(got, "x11: connect") || !strings.HasPrefix(got, "Couldn't show the desktop:") {
+		t.Errorf("text %q", got)
+	}
+}
+
+func TestExpiryNoteDeduplicatesOnExplainedText(t *testing.T) {
+	err := fmt.Errorf("icons: %w", errors.New("boom"))
+	n := noteExpiry("", err)
+	if !n.print || n.explained != "icons: boom" || n.short != "icons: boom" {
+		t.Fatalf("first: %+v", n)
+	}
+	if n2 := noteExpiry(n.explained, err); n2.print {
+		t.Errorf("same error printed twice: %+v", n2)
+	}
+	mapped := fmt.Errorf("mute: %w", errors.New("pulse: connect: refused"))
+	m := noteExpiry(n.explained, mapped)
+	if !m.print || m.explained != usererr.Explain(mapped) || strings.Contains(m.short, "details:") {
+		t.Errorf("mapped: %+v", m)
+	}
+	if c := noteExpiry(m.explained, nil); c.print || c.explained != "" || c.short != "" {
+		t.Errorf("cleared: %+v", c)
 	}
 }

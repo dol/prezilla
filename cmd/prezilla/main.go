@@ -15,6 +15,7 @@ import (
 	"prezilla/internal/platform"
 	"prezilla/internal/system"
 	"prezilla/internal/tray"
+	"prezilla/internal/usererr"
 )
 
 var version = "dev"
@@ -42,23 +43,23 @@ func run(ctx context.Context) int {
 	}
 	cfg, err := core.LoadConfig(core.DefaultConfigPath())
 	if cfg, err = cli.ResolveConfig(cmd, cfg, err, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 		return 1
 	}
 	desktop, err := platform.Detect(os.Getenv)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 		return 1
 	}
 	backends := system.Backends{Runner: system.ExecRunner{}, Audio: system.PulseAudio{}, Windows: system.X11Windows{}}
 	switches, err := platform.Switches(desktop, backends, cfg)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 		return 1
 	}
 	all, err := platform.AllSwitches(desktop, backends, cfg)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 		return 1
 	}
 	d.Engine = core.NewEngine(switches, core.NewStore(core.DefaultStatePath()), time.Now)
