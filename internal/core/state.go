@@ -31,6 +31,14 @@ const defaultLockTimeout = 30 * time.Second
 // holder is cut off before waiters give up.
 const OperationTimeout = 25 * time.Second
 
+// CorrectiveTimeout bounds one best-effort corrective call a switch makes
+// after a failed change (for example unmuting after a mute request that
+// errored but may have landed). It runs detached from the caller's context,
+// so it can extend an operation past OperationTimeout:
+// OperationTimeout + CorrectiveTimeout + the state save must stay below
+// defaultLockTimeout so waiters are never cut off first.
+const CorrectiveTimeout = 3 * time.Second
+
 func NewStore(path string) *Store { return &Store{path: path, lockTimeout: defaultLockTimeout} }
 
 // Load returns the zero State if the file does not exist.

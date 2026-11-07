@@ -66,3 +66,13 @@ func TestOperationTimeoutBelowLockTimeout(t *testing.T) {
 		t.Errorf("OperationTimeout %s must be below lock timeout %s", OperationTimeout, defaultLockTimeout)
 	}
 }
+
+func TestOperationAndCorrectiveFitInsideLockWait(t *testing.T) {
+	if CorrectiveTimeout <= 0 || CorrectiveTimeout > 3*time.Second {
+		t.Fatalf("CorrectiveTimeout = %v, want (0, 3s]", CorrectiveTimeout)
+	}
+	if OperationTimeout+CorrectiveTimeout >= defaultLockTimeout {
+		t.Fatalf("OperationTimeout %v + CorrectiveTimeout %v must stay below lock wait %v",
+			OperationTimeout, CorrectiveTimeout, defaultLockTimeout)
+	}
+}
