@@ -3,9 +3,12 @@ package tray
 import (
 	"bytes"
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"prezilla/internal/core"
 	"prezilla/internal/tray/icons"
 )
 
@@ -106,4 +109,34 @@ func TestTogglerGuardsDetachesAndWaits(t *testing.T) {
 		t.Fatal("wait did not return after toggle finished")
 	}
 	tg.wait() // idle: must not block
+}
+
+func TestSpawnIfDeadline(t *testing.T) {
+	deadline := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		st    core.State
+		stErr error
+		want  int
+	}{
+		{"active with deadline", core.State{Active: true, ExpiresAt: deadline}, nil, 1},
+		{"active without deadline", core.State{Active: true}, nil, 0},
+		{"inactive", core.State{ExpiresAt: deadline}, nil, 0},
+		{"status error", core.State{}, errors.New("read"), 0},
+	}
+	for _, c := range cases {
+		n := 0
+		err := spawnIfDeadline(func() (core.State, error) { return c.st, c.stErr }, func() error { n++; return nil })
+		if n != c.want || err != nil {
+			t.Errorf("%s: spawned %d err %v, want %d", c.name, n, err, c.want)
+		}
+	}
+	err := spawnIfDeadline(func() (core.State, error) { return core.State{Active: true, ExpiresAt: deadline}, nil },
+		func() error { return errors.New("exec failed") })
+	if err == nil || !strings.Contains(err.Error(), "start watcher: exec failed") {
+		t.Errorf("spawn error = %v", err)
+	}
+	if err := spawnIfDeadline(func() (core.State, error) { return core.State{Active: true, ExpiresAt: deadline}, nil }, nil); err != nil {
+		t.Errorf("nil spawn: %v", err)
+	}
 }

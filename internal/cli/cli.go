@@ -44,6 +44,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer, d Deps) int 
 	case "status":
 		return runStatus(ctx, out, errOut, d)
 	case "tray":
+		prepareTray(ctx, errOut, d)
 		if err := d.Tray(ctx); err != nil {
 			return fail(errOut, err)
 		}
@@ -53,6 +54,25 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer, d Deps) int 
 	}
 	fmt.Fprintf(errOut, "unknown command %q\n%s\n", cmd, usage)
 	return 2
+}
+
+// prepareTray enforces the deadline before the tray starts, so a login-time
+// start restores an expired session and keeps watching a live one even when
+// the tray then exits for lack of a host. Errors are reported, not fatal.
+func prepareTray(ctx context.Context, errOut io.Writer, d Deps) {
+	if _, err := d.Engine.DisableIfExpired(ctx); err != nil {
+		fmt.Fprintln(errOut, err)
+	}
+	st, err := d.Engine.Status()
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return
+	}
+	if st.Active && !st.ExpiresAt.IsZero() && d.SpawnWatcher != nil {
+		if err := d.SpawnWatcher(); err != nil {
+			fmt.Fprintf(errOut, "start watcher: %v\n", err)
+		}
+	}
 }
 
 func fail(errOut io.Writer, err error) int {

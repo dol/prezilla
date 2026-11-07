@@ -320,3 +320,65 @@ func TestRunWatchRetriesAfterPartialDisableFailure(t *testing.T) {
 		t.Errorf("attempts %d, want 3", sw.attempts)
 	}
 }
+
+func TestRunTrayRestoresExpiredStateBeforeTrayEvenIfTrayFails(t *testing.T) {
+	h := newHarness(t)
+	h.run("on", "--for", "5m")
+	h.spawned = 0
+	h.clk.advance(time.Hour)
+	var activeAtTray, enabledAtTray bool
+	h.d.Tray = func(context.Context) error {
+		st, _ := h.d.Engine.Status()
+		activeAtTray, enabledAtTray = st.Active, h.sw.enabled
+		return errors.New("no host")
+	}
+	if c := h.run("tray"); c != 1 {
+		t.Errorf("code %d", c)
+	}
+	if activeAtTray || enabledAtTray {
+		t.Errorf("not restored before tray: active=%v enabled=%v", activeAtTray, enabledAtTray)
+	}
+	if h.spawned != 0 {
+		t.Errorf("spawned %d after expiry restore", h.spawned)
+	}
+}
+
+func TestRunTraySpawnsWatcherWhenActiveWithDeadline(t *testing.T) {
+	h := newHarness(t)
+	h.run("on", "--for", "5m")
+	h.spawned = 0
+	h.d.Tray = func(context.Context) error {
+		if h.spawned != 1 {
+			t.Errorf("watcher not spawned before tray (spawned=%d)", h.spawned)
+		}
+		return errors.New("no host")
+	}
+	h.run("tray")
+	if h.spawned != 1 {
+		t.Errorf("spawned %d, want 1", h.spawned)
+	}
+}
+
+func TestRunTraySpawnsNothingWhenInactiveOrNoDeadline(t *testing.T) {
+	h := newHarness(t)
+	h.run("tray")
+	h.run("on", "--for", "0")
+	h.run("tray")
+	if h.spawned != 0 {
+		t.Errorf("spawned %d", h.spawned)
+	}
+}
+
+func TestRunTrayExpiryErrorIsPrintedAndTrayStillRuns(t *testing.T) {
+	h := newHarness(t)
+	sw := &flakyDisable{fakeSwitch: fakeSwitch{id: "icons"}, failures: 1}
+	h.d.Engine = core.NewEngine([]core.Switch{sw}, core.NewStore(filepath.Join(t.TempDir(), "state.json")), h.clk.now)
+	h.run("on", "--for", "5m")
+	h.clk.advance(time.Hour)
+	if c := h.run("tray"); c != 0 || h.tray != 1 {
+		t.Errorf("code %d tray %d", c, h.tray)
+	}
+	if !strings.Contains(h.errOut.String(), "restore failed") {
+		t.Errorf("stderr %q", h.errOut.String())
+	}
+}

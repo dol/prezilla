@@ -62,7 +62,7 @@ func run(ctx context.Context) int {
 	d.Engine = core.NewEngine(switches, core.NewStore(core.DefaultStatePath()), time.Now)
 	d.Engine.SetRestorers(all)
 	d.DefaultTimeout = cfg.Timeout()
-	d.Tray = func(ctx context.Context) error { return tray.Run(ctx, d.Engine, cfg.Timeout()) }
+	d.Tray = func(ctx context.Context) error { return tray.Run(ctx, d.Engine, cfg.Timeout(), spawnWatcher) }
 	return cli.Run(ctx, args, os.Stdout, os.Stderr, d)
 }
 

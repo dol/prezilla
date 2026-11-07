@@ -98,8 +98,26 @@ func hostAvailable() bool {
 	return err == nil && ok
 }
 
+// spawnIfDeadline calls spawn when status reports the mode active with a
+// deadline, so a tray-started session is enforced after the tray quits. A
+// status error spawns nothing (refresh reports it); spawn errors are returned.
+func spawnIfDeadline(status func() (core.State, error), spawn func() error) error {
+	if spawn == nil {
+		return nil
+	}
+	st, err := status()
+	if err != nil || !st.Active || st.ExpiresAt.IsZero() {
+		return nil
+	}
+	if err := spawn(); err != nil {
+		return fmt.Errorf("start watcher: %w", err)
+	}
+	return nil
+}
+
 // Run shows the tray icon and blocks until Quit is chosen or ctx is cancelled.
-func Run(ctx context.Context, e *core.Engine, timeout time.Duration) error {
+// spawn starts the detached deadline watcher after a toggle turns the mode on.
+func Run(ctx context.Context, e *core.Engine, timeout time.Duration, spawn func() error) error {
 	if !hostAvailable() {
 		return errNoHost
 	}
@@ -107,12 +125,12 @@ func Run(ctx context.Context, e *core.Engine, timeout time.Duration) error {
 	defer cancel()
 
 	var tg toggler
-	systray.Run(func() { onReady(ctx, cancel, e, timeout, &tg) }, cancel)
+	systray.Run(func() { onReady(ctx, cancel, e, timeout, spawn, &tg) }, cancel)
 	tg.wait()
 	return nil
 }
 
-func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, timeout time.Duration, tg *toggler) {
+func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, timeout time.Duration, spawn func() error, tg *toggler) {
 	systray.SetIcon(Icon(false))
 	systray.SetTitle("prezilla")
 	toggle := systray.AddMenuItem("", "")
@@ -176,6 +194,9 @@ func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, tim
 			case <-toggle.ClickedCh:
 				tg.start(ctx, func(tctx context.Context) {
 					_, err := e.Toggle(tctx, timeout)
+					if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
+						err = errors.Join(err, serr)
+					}
 					mu.Lock()
 					lastErr = err
 					mu.Unlock()
