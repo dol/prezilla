@@ -44,7 +44,8 @@ func (s *Store) Load() (State, error) {
 	return st, nil
 }
 
-// Save writes atomically via a temp file in the same directory.
+// Save writes atomically and durably: fsynced temp file in the same
+// directory, rename, then a best-effort fsync of the directory.
 func (s *Store) Save(st State) error {
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
@@ -67,13 +68,29 @@ func (s *Store) Save(st State) error {
 		tmp.Close()
 		return fmt.Errorf("write state %s: %w", s.path, err)
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write state %s: %w", s.path, err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("write state %s: %w", s.path, err)
 	}
 	if err := os.Rename(tmp.Name(), s.path); err != nil {
 		return fmt.Errorf("write state %s: %w", s.path, err)
 	}
+	syncDir(dir)
 	return nil
+}
+
+// syncDir best-effort fsyncs dir so a completed rename survives a crash.
+// Errors are ignored: not every platform or filesystem supports it.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	d.Close()
 }
 
 // DefaultStatePath is $XDG_STATE_HOME/prezilla/state.json, else ~/.local/state/prezilla/state.json.
