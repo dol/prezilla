@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"prezilla/internal/about"
 )
@@ -27,8 +28,26 @@ var ErrNoZenity = errors.New("about: zenity not found")
 // closes it.
 type ZenityAbout struct {
 	Runner Runner
+	// Now is the clock for the quick-exit rule; nil means time.Now.
+	Now func() time.Time
 }
 
+// zenityQuickExit is how fast an exit 1 must come to count as "GTK could not
+// start" rather than a person pressing Close.
+const zenityQuickExit = 300 * time.Millisecond
+
+// zenityStartFailure reports whether an exit-1 error means zenity never
+// showed a window: GTK says it cannot open the display, or it exited too fast
+// for anyone to have clicked.
+func zenityStartFailure(err error, elapsed time.Duration) bool {
+	text := err.Error()
+	return strings.Contains(text, "cannot open display") ||
+		strings.Contains(text, "Failed to open display") ||
+		elapsed < zenityQuickExit
+}
+
+// Exit 1 is also what GTK reports when it cannot start (dead display); see
+// zenityStartFailure.
 // zenity --info exit codes besides 0 (Close) that mean "closed, nothing to
 // do": 1 (cancel), 5 (--timeout) and 255 (title-bar X or Esc).
 var zenityClosed = map[int]bool{1: true, 5: true, 255: true}
@@ -50,13 +69,22 @@ func (z ZenityAbout) Show(ctx context.Context, info about.Info) error {
 		}
 		return fmt.Errorf("about: zenity --version: %w", err)
 	}
+	now := z.Now
+	if now == nil {
+		now = time.Now
+	}
+	started := now()
 	_, err = z.Runner.Run(ctx, "zenity", zenityArgs(zenityMajor(ver), info)...)
 	if err != nil {
+		elapsed := now().Sub(started)
 		var ec interface{ ExitCode() int }
 		switch {
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case errors.As(err, &ec) && zenityClosed[ec.ExitCode()]:
+			if ec.ExitCode() == 1 && zenityStartFailure(err, elapsed) {
+				return fmt.Errorf("about: zenity could not start its window: %w", err)
+			}
 			return nil
 		case errors.Is(err, context.DeadlineExceeded):
 			// The runner's own timeout killed a window nobody answered.

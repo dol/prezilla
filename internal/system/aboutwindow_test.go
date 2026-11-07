@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"prezilla/internal/about"
 )
@@ -64,9 +65,16 @@ func TestZenityAboutIconFlagByMajorVersion(t *testing.T) {
 	}
 }
 
+// steppingClock advances by step on every call, so a Show sees step elapsed.
+func steppingClock(step time.Duration) func() time.Time {
+	t := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	return func() time.Time { t = t.Add(step); return t }
+}
+
 func TestZenityAboutClosedExitsAreNil(t *testing.T) {
 	for _, code := range []int{1, 5, 255} {
 		z, r := newZenity("4.2.1")
+		z.Now = steppingClock(5 * time.Second)
 		r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w", exitErr(code))
 		if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
 			t.Errorf("exit %d: %v", code, err)
@@ -196,5 +204,47 @@ func TestAboutMarkupHostileBackslashVersion(t *testing.T) {
 	want := "<b>Prezilla</b> 1&lt;b&gt;x&lt;/b&gt;&amp;&quot;&apos;\\\\074i\\\\076\n"
 	if !strings.HasPrefix(got, want) {
 		t.Errorf("markup %q, want prefix %q", got, want)
+	}
+}
+
+// GTK that cannot start exits 1 like a cancelled dialog; it must fall back.
+func TestZenityAboutExit1WithDeadDisplayIsError(t *testing.T) {
+	for _, msg := range []string{
+		"Gtk-WARNING **: cannot open display: :0",
+		"(zenity:1): Gtk-WARNING **: Failed to open display",
+	} {
+		z, r := newZenity("4.2.1")
+		z.Now = steppingClock(10 * time.Second) // not instant: the phrase alone decides
+		r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w: %s", exitErr(1), msg)
+		err := z.Show(context.Background(), about.New("1.2.3"))
+		if err == nil || errors.Is(err, ErrNoZenity) || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%q: got %v", msg, err)
+		}
+	}
+}
+
+func TestZenityAboutInstantExit1IsError(t *testing.T) {
+	z, r := newZenity("4.2.1")
+	z.Now = steppingClock(50 * time.Millisecond)
+	r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w", exitErr(1))
+	if err := z.Show(context.Background(), about.New("1.2.3")); err == nil {
+		t.Error("an instant exit 1 must be an error")
+	}
+	// 5 and 255 are not affected by the quick-exit rule.
+	for _, code := range []int{5, 255} {
+		z.Now = steppingClock(time.Millisecond)
+		r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w", exitErr(code))
+		if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
+			t.Errorf("exit %d: %v", code, err)
+		}
+	}
+}
+
+func TestZenityAboutSlowExit1WithOtherStderrIsClose(t *testing.T) {
+	z, r := newZenity("4.2.1")
+	z.Now = steppingClock(2 * time.Second)
+	r.Err[zenityKey("--icon=prezilla", wantMarkup)] = fmt.Errorf("zenity: %w: some harmless warning", exitErr(1))
+	if err := z.Show(context.Background(), about.New("1.2.3")); err != nil {
+		t.Errorf("got %v", err)
 	}
 }
