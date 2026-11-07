@@ -149,10 +149,11 @@ func quitTitle(active bool) string {
 	return "Quit"
 }
 
-// toggleCooldown is how long after an accepted toggle further toggle clicks
-// (icon or checkbox) are ignored, so a double click cannot flip the mode
-// on and straight back off.
-const toggleCooldown = 500 * time.Millisecond
+// toggleCooldown is how long after an accepted toggle starts and again after
+// it finishes that further toggle clicks (icon or checkbox) are ignored, so a
+// double click cannot flip the mode on and straight back off, however slow
+// the click pair or the toggle.
+const toggleCooldown = time.Second
 
 // clickGate drops toggle clicks within toggleCooldown of the last accepted
 // toggle.
@@ -199,11 +200,21 @@ func tryToggleOutcome(ctx context.Context, g *clickGate, tg *toggler, fn func(co
 	if !g.last.IsZero() && now.Sub(g.last) < toggleCooldown {
 		return outcomeCooling
 	}
-	if !tg.start(ctx, fn) {
+	if !tg.start(ctx, func(c context.Context) {
+		defer g.restart() // the cooldown runs from the end of the toggle too
+		fn(c)
+	}) {
 		return outcomeBusy
 	}
 	g.last = now
 	return outcomeStarted
+}
+
+// restart begins a new cooldown at the current time.
+func (g *clickGate) restart() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.last = g.now()
 }
 
 // startExtend runs one Engine.Extend call for the Reset timer item on xt, detached from ctx's cancellation

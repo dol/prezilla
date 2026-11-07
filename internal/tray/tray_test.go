@@ -389,7 +389,7 @@ func TestToggleCooldownDropsFastSecondClick(t *testing.T) {
 	if requestToggle(g, req) || len(req) != 0 {
 		t.Error("click during cooldown was queued or reported accepted")
 	}
-	clk.add(500 * time.Millisecond) // +600ms
+	clk.add(time.Second) // +1.1s
 	if !requestToggle(g, req) || len(req) != 1 {
 		t.Error("click after cooldown not queued")
 	}
@@ -397,7 +397,7 @@ func TestToggleCooldownDropsFastSecondClick(t *testing.T) {
 		t.Error("a click merged into a queued one counts as accepted")
 	}
 	if !tryToggle(context.Background(), g, &tg, fn) {
-		t.Error("click at +600ms refused")
+		t.Error("click at +1.1s refused")
 	}
 	tg.wait()
 	mu.Lock()
@@ -405,7 +405,7 @@ func TestToggleCooldownDropsFastSecondClick(t *testing.T) {
 	if runs != 2 {
 		t.Errorf("toggle ran %d times, want 2", runs)
 	}
-	if toggleCooldown != 500*time.Millisecond {
+	if toggleCooldown != time.Second {
 		t.Errorf("cooldown %v", toggleCooldown)
 	}
 }
@@ -431,7 +431,7 @@ func TestToggleCooldownStartsEvenWhenToggleFails(t *testing.T) {
 	}
 }
 
-func TestToggleWhileRunningDroppedAndDoesNotRestartCooldown(t *testing.T) {
+func TestToggleWhileRunningDroppedAndCooldownRunsFromItsEnd(t *testing.T) {
 	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
 	g := &clickGate{now: clk.now}
 	var tg toggler
@@ -445,10 +445,14 @@ func TestToggleWhileRunningDroppedAndDoesNotRestartCooldown(t *testing.T) {
 	}
 	close(release)
 	tg.wait()
-	clk.add(10 * time.Millisecond)
+	clk.add(700 * time.Millisecond) // a slow second click after a slow toggle
+	if tryToggle(context.Background(), g, &tg, func(context.Context) { t.Error("click inside the cooldown after the end ran") }) {
+		t.Error("click 700ms after the toggle ended accepted")
+	}
+	clk.add(400 * time.Millisecond)
 	ran := make(chan struct{})
 	if !tryToggle(context.Background(), g, &tg, func(context.Context) { close(ran) }) {
-		t.Error("dropped click restarted the cooldown")
+		t.Error("click after the cooldown from the end refused")
 	}
 	<-ran
 	tg.wait()
@@ -852,6 +856,10 @@ func TestTryToggleOutcomeSaysWhyItWasRefused(t *testing.T) {
 	}
 	close(release)
 	tg.wait()
+	if got := tryToggleOutcome(context.Background(), g, &tg, func(context.Context) {}); got != outcomeCooling {
+		t.Errorf("just after the toggle ended: %v", got)
+	}
+	clk.add(time.Second)
 	if got := tryToggleOutcome(context.Background(), g, &tg, func(context.Context) {}); got != outcomeStarted {
 		t.Errorf("idle after cooldown: %v", got)
 	}
