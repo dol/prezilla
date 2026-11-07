@@ -83,7 +83,7 @@ func TestNotificationsUnreadableDefaultsToFalse(t *testing.T) {
 	}
 }
 
-const muteGet = "pactl get-sink-mute @DEFAULT_SINK@"
+const muteGet = "env LC_ALL=C pactl get-sink-mute @DEFAULT_SINK@"
 
 func TestMuteAlreadyMutedStaysMuted(t *testing.T) {
 	f := &system.FakeRunner{Out: map[string]string{muteGet: "Mute: yes"}}
@@ -118,4 +118,21 @@ func TestMuteReadFailureErrorMentionsPactl(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "pactl") {
 		t.Fatalf("got %v", err)
 	}
+}
+
+func TestMuteLocalizedOutputFailsClosed(t *testing.T) {
+	f := &system.FakeRunner{Out: map[string]string{muteGet: "Stumm: ja"}}
+	_, err := NewMute(f).Enable(ctx)
+	if err == nil || !strings.Contains(err.Error(), "pactl get-sink-mute") {
+		t.Fatalf("got %v", err)
+	}
+	lacks(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 1")
+}
+
+func TestMuteEmptyOutputFailsClosed(t *testing.T) {
+	f := &system.FakeRunner{}
+	if _, err := NewMute(f).Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	lacks(t, f, "pactl set-sink-mute @DEFAULT_SINK@ 1")
 }
