@@ -54,7 +54,7 @@ func cases() []struct {
 		{"minimize restore timeout", fmt.Errorf("minimize: %w", fmt.Errorf("restore desktop: %w", fmt.Errorf("x11: timed out after 5s: %w", context.DeadlineExceeded))),
 			`Couldn't bring your windows back: the X server didn't answer in time. Run "prezilla off" again.`},
 		{"save state", fmt.Errorf("save state: %w", fmt.Errorf("write state /home/u/.local/state/prezilla/state.json: %w", errors.New("no space left on device"))),
-			`Couldn't save Prezilla's state (/home/u/.local/state/prezilla/state.json). Check free space and permissions, then run "prezilla off".`},
+			`Couldn't save Prezilla's state (/home/u/.local/state/prezilla/state.json). Check free space and permissions, then try again.`},
 		{"start watcher", fmt.Errorf("start watcher: %w", errors.New("fork/exec: resource temporarily unavailable")),
 			`Couldn't start the background timer, so presentation mode won't end by itself. Run "prezilla off" when you are done.`},
 		{"notify no actions", errors.New("notify: server does not support actions"),

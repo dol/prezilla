@@ -99,7 +99,7 @@ var rules = []rule{
 	}},
 	{"state cannot be saved", func(_ error, text string) (string, bool) {
 		if m := saveStateRE.FindStringSubmatch(text); m != nil {
-			return fmt.Sprintf(`Couldn't save Prezilla's state (%s). Check free space and permissions, then run "prezilla off".`, m[1]), true
+			return fmt.Sprintf(`Couldn't save Prezilla's state (%s). Check free space and permissions, then try again.`, m[1]), true
 		}
 		return "", false
 	}},
