@@ -38,6 +38,7 @@ type FakeAudio struct {
 	Muted      map[string]bool // mute state per sink name; unknown names error in SinkMuted
 	MutedErr   error           // returned by SinkMuted when set
 	SetErr     error           // returned by SetSinkMute when set
+	SetErrOnce error           // returned by the first SetSinkMute only, then cleared
 	Sinks      []string        // sinks SinkExists knows about
 	SinksErr   error           // returned by SinkExists when set
 }
@@ -70,6 +71,11 @@ func (f *FakeAudio) SinkMuted(_ context.Context, name string) (bool, error) {
 // SetSinkMute implements Audio. It also updates Muted.
 func (f *FakeAudio) SetSinkMute(_ context.Context, name string, mute bool) error {
 	f.record(fmt.Sprintf("SetSinkMute %s %t", name, mute))
+	if f.SetErrOnce != nil {
+		err := f.SetErrOnce
+		f.SetErrOnce = nil
+		return err
+	}
 	if f.SetErr != nil {
 		return f.SetErr
 	}

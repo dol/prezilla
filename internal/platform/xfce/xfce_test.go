@@ -252,6 +252,39 @@ func TestMuteSetFailureOnEnableIsReported(t *testing.T) {
 	}
 }
 
+func TestMuteSetFailureTriggersCorrectiveUnmute(t *testing.T) {
+	f := &system.FakeAudio{Default: sinkA, Muted: map[string]bool{sinkA: false}, SetErrOnce: errors.New("timed out")}
+	if _, err := NewMute(f).Enable(ctx); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("got %v", err)
+	}
+	want := []string{"SetSinkMute " + sinkA + " true", "SetSinkMute " + sinkA + " false"}
+	var sets []string
+	for _, c := range f.Calls {
+		if strings.HasPrefix(c, "SetSinkMute") {
+			sets = append(sets, c)
+		}
+	}
+	if !slices.Equal(sets, want) {
+		t.Fatalf("set calls %v", sets)
+	}
+}
+
+func TestMuteSetFailureWhenAlreadyMutedHasNoCorrection(t *testing.T) {
+	f := &system.FakeAudio{Default: sinkA, Muted: map[string]bool{sinkA: true}, SetErrOnce: errors.New("boom")}
+	if _, err := NewMute(f).Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	n := 0
+	for _, c := range f.Calls {
+		if strings.HasPrefix(c, "SetSinkMute") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
 func TestMuteUnknownSinkFailsClosed(t *testing.T) {
 	f := &system.FakeAudio{}
 	if _, err := NewMute(f).Enable(ctx); err == nil {

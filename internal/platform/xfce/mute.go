@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"prezilla/internal/core"
 	"prezilla/internal/system"
@@ -34,6 +35,13 @@ func (s mute) Enable(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("read sink mute: %w", err)
 	}
 	if err := s.a.SetSinkMute(ctx, sink, true); err != nil {
+		if !muted {
+			// The request may still have landed (a library call cannot be
+			// cancelled) while nothing is saved, so undo it best effort.
+			fix, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			_ = s.a.SetSinkMute(fix, sink, false)
+			cancel()
+		}
 		return "", fmt.Errorf("mute sink: %w", err)
 	}
 	was := "no"

@@ -29,6 +29,9 @@ func (p PulseAudio) timeout() time.Duration {
 // bound it finishes (and closes its client) in the background.
 func withClient[T any](parent context.Context, p PulseAudio, fn func(*pulse.Client) (T, error)) (T, error) {
 	var zero T
+	if err := parent.Err(); err != nil {
+		return zero, fmt.Errorf("pulse: %w", err)
+	}
 	timeout := p.timeout()
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
@@ -44,6 +47,11 @@ func withClient[T any](parent context.Context, p PulseAudio, fn func(*pulse.Clie
 			return
 		}
 		defer c.Close()
+		// The context may have fired while connecting; never send then.
+		if err := ctx.Err(); err != nil {
+			ch <- result{err: fmt.Errorf("pulse: %w", err)}
+			return
+		}
 		v, err := fn(c)
 		ch <- result{v, err}
 	}()
