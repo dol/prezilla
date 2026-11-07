@@ -8,8 +8,8 @@ description: Toggle presentation mode (icons, notifications, presentation, mute,
 homepage: https://github.com/dol/prezilla
 license: Apache-2.0
 
-# zenity draws the tray's About window; it is optional: without it Prezilla
-# draws its own window.
+# zenity is recommended for the tray's wallpaper file chooser; it is optional:
+# without it a notification explains how to set "wallpaper" in config.json.
 # nfpm has no recommends for archlinux (optdepends are not supported), so the
 # Arch package lists nothing.
 overrides:

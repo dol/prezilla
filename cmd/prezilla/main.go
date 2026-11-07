@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -69,37 +67,17 @@ func run(ctx context.Context) int {
 	d.Engine.SetRestorers(all)
 	d.DefaultTimeout = cfg.Timeout()
 	d.Tray = func(ctx context.Context) error {
-		// The About window waits until it is closed, so its runner gets a
-		// long timeout; Quit still closes it through ctx. zenity 4 reads
-		// --icon=prezilla as a file path first, so run it from "/" where no
-		// such file can shadow the icon name.
-		// The built-in X11 window comes first (zenity draws the logo too
-		// small); zenity is the fallback and the tray falls back to a
-		// notification if both fail.
-		// The logo is written to the cache directory so zenity gets a file
-		// path: the icon theme has no "prezilla" entry until the application
-		// is installed.
-		zenity := system.ZenityAbout{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}, IconFile: iconFile()}
-		aboutWindow := &system.FallbackAbout{
-			Primary:   system.X11About{Icon: icons.App},
-			Secondary: zenity,
-			// A dead display fails zenity too; any other failure of the
-			// built-in window (for example an unsupported visual) tries it.
-			ShouldFallback: func(err error) bool { return !errors.Is(err, system.ErrNoDisplay) },
-			Note: func(err error) {
-				fmt.Fprintf(os.Stderr, "about: built-in window failed (%v); trying zenity\n", err)
-			},
-		}
 		return tray.Run(ctx, tray.Config{
 			Engine: d.Engine, Timeout: cfg.Timeout(), Spawn: spawnWatcher,
 			About:       about.New(version),
 			Notifier:    system.DBusNotifier{},
-			AboutWindow: aboutWindow,
+			AboutWindow: system.X11About{Icon: icons.App},
 			ScreenSaver: system.DBusScreenSaver{},
 			Prompter:    system.DBusPrompter{},
 			ConfigPath:  core.DefaultConfigPath(),
-			// Like the About window, the chooser waits for the user and
-			// runs from "/".
+			// The chooser waits for the user, so its runner gets a long
+			// timeout; Quit still closes it through ctx. zenity 4 reads
+			// --filename as a file path first, so run it from "/".
 			Chooser:  system.ZenityChooser{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}},
 			StartDir: homeDir(),
 			SwitchFor: func(id, image string) (core.Switch, error) {
@@ -139,18 +117,4 @@ func spawnWatcher() error {
 		return err
 	}
 	return cmd.Process.Release()
-}
-
-// iconFile writes the embedded application icon under the user cache directory
-// and returns its path, or "" when that fails (zenity then uses the icon name).
-func iconFile() string {
-	dir, err := os.UserCacheDir()
-	if err != nil {
-		return ""
-	}
-	path, err := system.WriteIconFile(filepath.Join(dir, "prezilla"), "prezilla.png", icons.App)
-	if err != nil {
-		return ""
-	}
-	return path
 }

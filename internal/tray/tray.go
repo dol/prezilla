@@ -383,7 +383,7 @@ func (s *aboutShower) logf(format string, args ...any) {
 }
 
 // show opens the window and waits for it. A cancelled ctx (Quit) returns
-// nil without a notification; a missing window tool, a missing display or another
+// nil without a notification; a missing display or another
 // window failure falls back to the notification, whose error is returned if it fails too.
 func (s *aboutShower) show(ctx context.Context) error {
 	if s.window != nil {
@@ -393,8 +393,6 @@ func (s *aboutShower) show(ctx context.Context) error {
 			return nil
 		case ctx.Err() != nil:
 			return nil
-		case errors.Is(err, system.ErrNoZenity):
-			s.warnOnce.Do(func() { s.logf("about: zenity not found; showing a notification instead") })
 		case errors.Is(err, system.ErrNoDisplay):
 			s.warnOnce.Do(func() { s.logf("about: no X display; showing a notification instead") })
 		default:

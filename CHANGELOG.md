@@ -9,14 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tray: a tick box per switch (Hide desktop icons, Disable notifications, Keep screen awake, Mute sound, Minimize windows, Change wallpaper). Changes apply at once, also while presentation mode is on, and are saved to `config.json`; unknown keys in the file are kept, and a symlinked file stays a symlink with its permissions.
 - Tray: "Choose wallpaper…" picks the wallpaper image with a `zenity` file chooser (without `zenity`, a notification explains how to set `wallpaper` in `config.json`). Choosing an image while presenting applies it at once.
 - Error sentences for a wallpaper image that no longer exists, a chosen file that is missing or not an image, a file chooser that cannot start, a `config.json` that cannot be saved, and turning presentation mode on with no switch ticked (which now fails with that sentence instead of doing nothing).
-- Tray: About Prezilla shows a built-in X11 window with the project link and a Close button, drawn with embedded fonts (no new runtime dependency); the notification is now the last fallback, used only when there is no X display.
+- Tray: About Prezilla shows a built-in X11 window with the logo, version, description, license, project link and a Close button, drawn with embedded fonts (no new runtime dependency); without an X display, a desktop notification is shown instead.
 - `presentation` switch (on by default, after `notifications`): turns on `xfce4-power-manager`'s presentation mode, which also keeps the screensaver and screen blanking off, and restores the previous value (or removes the setting) on `off`. It needs `xfce4-power-manager` to be running.
 - Tray: the Quit item reads "Quit (presentation stays on)" while presentation mode is on, and "Quit" otherwise.
-- Tray: if zenity cannot open its window because the display is dead, About falls back to the notification instead of doing nothing.
 - Plain-language errors: the common failures (no sound server, no X display, unreachable XFCE settings service, no wallpaper image, another action running, unreadable saved state, invalid `config.json`, unsupported desktop) are reported as a sentence with a next step (also timeouts of the sound and X servers, a state file that cannot be saved, a deadline timer that cannot be started, and a notification server without buttons); the technical text follows in parentheses on stderr and is left out of the tray tooltip.
 - `prezilla` CLI: `on`, `off`, `toggle`, `status` and `version`.
 - `prezilla about` prints version, license and website.
-- Tray menu entry "About Prezilla": a small window (built-in X11 window, with `zenity` as the fallback) with the project link and a "Close" button; without an X display, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity`.
+- Tray menu entry "About Prezilla": a small window with the project link and a "Close" button; without an X display, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity` for the wallpaper file chooser.
 - System tray front-end (`prezilla tray`) with an autostart entry.
 - Tray timer entry showing when presentation mode ends and the minutes left, with a "Reset timer to N min" entry below it once the label says less than N minutes are left (at least a minute has passed; right after turning on, the item is hidden because it would change nothing) (the end time becomes N minutes from now; a later one is kept).
 - The menu shows a "Presentation mode" checkbox instead of a state label; it toggles the mode. A click on the tray icon toggles too where the panel sends one (a middle click on the XFCE panel when "menu is primary" is on, a left click otherwise).
@@ -29,7 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - GitHub Actions CI and release workflows.
 
 ### Changed
-- Tray: About Prezilla opens the built-in X11 window first (it shows the logo at a readable size) and falls back to `zenity`, then to a notification.
+- About no longer uses `zenity`; it is only used for the wallpaper file chooser.
 - `wallpaper` in `config.json` adds the `wallpaper` switch only when the file has no `switches` key; a `switches` list is used exactly as written. If your file lists `switches` and sets `wallpaper`, add "wallpaper" to `switches` to keep it.
 - Icons, notifications and wallpaper (and the new presentation switch) talk to the XFCE settings daemon (`xfconfd`) directly over the D-Bus session bus instead of running `xfconf-query`, which is no longer needed. A settings service that cannot be reached is reported as a plain sentence with a next step.
 - The product is written "Prezilla" in all user-visible text (About window, tray, notifications, desktop entry); the command, package and paths stay `prezilla`.
@@ -38,7 +37,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Mute and show-desktop no longer need external audio or window-manager tools: they use native PulseAudio and EWMH clients, and packages no longer recommend those tools.
 
 ### Fixed
-- About: the logo shows in the zenity window and in the built-in window even when Prezilla is not installed (it was a broken-image placeholder, because the icon theme has no `prezilla` entry until installation); the logo is written to the user cache directory for zenity.
 - `minimize`: after alt+tab to a window during presentation mode, turning the mode off brought back only that window. Prezilla now remembers the windows it minimized and restores them itself when the window manager has forgotten them; windows you had minimized before stay minimized.
 - External commands time out after 10 s and engine operations after 25 s, so a hung `xfconf-query` or native audio/X11 call can no longer hold the state lock and block `off`, the watcher and the tray.
 - Concurrent `prezilla` processes (tray, CLI, watcher) serialize on a state lock, so originals can no longer be lost; the state file is fsynced on save.

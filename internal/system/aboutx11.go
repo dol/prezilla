@@ -24,7 +24,7 @@ var ErrNoDisplay = errors.New("about: no X display")
 
 // X11About shows the About window itself, drawn with the embedded Go fonts
 // into an in-memory image and sent to the server with PutImage: no toolkit,
-// no cgo, no system fonts. It is the fallback for a missing zenity.
+// no cgo, no system fonts.
 type X11About struct {
 	// Icon is the PNG shown at the top and set as the window icon; nil
 	// shows no icon.

@@ -528,24 +528,6 @@ func TestAboutShowerWindowSuccessSendsNoNotification(t *testing.T) {
 	}
 }
 
-func TestAboutShowerNoZenityFallsBackAndWarnsOnce(t *testing.T) {
-	w := &fakeWindow{err: fmt.Errorf("%w: exec: not found", system.ErrNoZenity)}
-	n := &system.FakeNotifier{}
-	s, log := newShower(w, n)
-	for i := 1; i <= 2; i++ {
-		if err := s.show(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		if len(n.Calls) != i || n.Calls[i-1].Summary != "Prezilla 1.2.3" ||
-			!strings.Contains(n.Calls[i-1].Body, about.Website) {
-			t.Fatalf("click %d: notify %v", i, n.Calls)
-		}
-	}
-	if log.String() != "about: zenity not found; showing a notification instead\n" {
-		t.Errorf("log %q", log.String())
-	}
-}
-
 func TestAboutShowerNoDisplayFallsBackAndWarnsOnce(t *testing.T) {
 	w := &fakeWindow{err: fmt.Errorf("%w: dial unix: no such file", system.ErrNoDisplay)}
 	n := &system.FakeNotifier{}
@@ -561,7 +543,7 @@ func TestAboutShowerNoDisplayFallsBackAndWarnsOnce(t *testing.T) {
 }
 
 func TestAboutShowerRealFailureFallsBack(t *testing.T) {
-	w := &fakeWindow{err: errors.New("about: zenity: exit status 2")}
+	w := &fakeWindow{err: errors.New("about: x11: exit status 2")}
 	n := &system.FakeNotifier{}
 	s, log := newShower(w, n)
 	if err := s.show(context.Background()); err != nil {
@@ -581,7 +563,7 @@ func TestAboutShowerNilWindowUsesNotification(t *testing.T) {
 }
 
 func TestAboutShowerBothFailShowsError(t *testing.T) {
-	w := &fakeWindow{err: fmt.Errorf("%w: exec: not found", system.ErrNoZenity)}
+	w := &fakeWindow{err: fmt.Errorf("%w: dial unix: no such file", system.ErrNoDisplay)}
 	n := &system.FakeNotifier{Err: errors.New("no bus")}
 	s, _ := newShower(w, n)
 	var a actionState

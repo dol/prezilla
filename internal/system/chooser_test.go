@@ -11,6 +11,12 @@ import (
 	"testing"
 )
 
+// exitErr mimics *exec.ExitError for FakeRunner.
+type exitErr int
+
+func (e exitErr) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+func (e exitErr) ExitCode() int { return int(e) }
+
 func chooserKey(startDir string) string {
 	return "zenity " + strings.Join(chooserArgs(startDir), " ")
 }

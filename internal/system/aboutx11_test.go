@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"image"
 	"image/color"
 	"testing"
@@ -174,115 +173,5 @@ func TestOpenURLMissingProgram(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if err := openURL("https://example.org"); err == nil {
 		t.Error("want an error without xdg-open")
-	}
-}
-
-// fakeAbout is a scripted AboutWindow.
-type fakeAbout struct {
-	err   error
-	calls int
-}
-
-func (f *fakeAbout) Show(context.Context, about.Info) error { f.calls++; return f.err }
-
-func TestFallbackAbout(t *testing.T) {
-	missing := fmt.Errorf("%w: exec: not found", ErrNoZenity)
-	noStart := fmt.Errorf("about: %w: %w", errZenityStart, errors.New("exit status 1: cannot open display"))
-	other := errors.New("about: zenity: exit status 2")
-	ctxErr := context.Canceled
-	secondFail := errors.New("about: no X display")
-	cases := []struct {
-		name          string
-		primary       error
-		secondary     error
-		wantSecondary int
-		want          error
-	}{
-		{"primary shown", nil, nil, 0, nil},
-		{"zenity missing", missing, nil, 1, nil},
-		{"zenity cannot start", noStart, nil, 1, nil},
-		{"secondary closed with error", missing, secondFail, 1, secondFail},
-		{"real zenity failure is final", other, nil, 0, other},
-		{"ctx error is final", ctxErr, nil, 0, ctxErr},
-	}
-	for _, c := range cases {
-		p, s := &fakeAbout{err: c.primary}, &fakeAbout{err: c.secondary}
-		f := &FallbackAbout{Primary: p, Secondary: s}
-		err := f.Show(context.Background(), about.New("1"))
-		if !errors.Is(err, c.want) && err != c.want {
-			t.Errorf("%s: err %v, want %v", c.name, err, c.want)
-		}
-		if p.calls != 1 || s.calls != c.wantSecondary {
-			t.Errorf("%s: primary %d secondary %d calls", c.name, p.calls, s.calls)
-		}
-	}
-}
-
-func TestFallbackAboutCancelledCtxSkipsSecondary(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	p := &fakeAbout{err: ErrNoZenity}
-	s := &fakeAbout{}
-	cancel()
-	err := (&FallbackAbout{Primary: p, Secondary: s}).Show(ctx, about.New("1"))
-	if !errors.Is(err, ErrNoZenity) || s.calls != 0 {
-		t.Errorf("err %v secondary calls %d", err, s.calls)
-	}
-}
-
-func TestFallbackAboutNotesOnce(t *testing.T) {
-	var notes []error
-	f := &FallbackAbout{Primary: &fakeAbout{err: ErrNoZenity}, Secondary: &fakeAbout{},
-		Note: func(err error) { notes = append(notes, err) }}
-	for i := 0; i < 3; i++ {
-		if err := f.Show(context.Background(), about.New("1")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(notes) != 1 || !errors.Is(notes[0], ErrNoZenity) {
-		t.Errorf("notes %v", notes)
-	}
-}
-
-// The real ZenityAbout errors drive the fallback: a dead-display start
-// failure reaches the secondary window, a user close does not.
-func TestFallbackAboutWithRealZenity(t *testing.T) {
-	key := zenityKey("--icon=prezilla", wantMarkup)
-	for msg, wantSecondary := range map[string]int{"Gtk-WARNING **: cannot open display: :0": 1, "": 0} {
-		z, r := newZenity("4.2.1")
-		r.Err[key] = fmt.Errorf("zenity: %w: %s", exitErr(1), msg)
-		s := &fakeAbout{}
-		if err := (&FallbackAbout{Primary: z, Secondary: s}).Show(context.Background(), about.New("1.2.3")); err != nil {
-			t.Errorf("%q: %v", msg, err)
-		}
-		if s.calls != wantSecondary {
-			t.Errorf("%q: secondary calls %d, want %d", msg, s.calls, wantSecondary)
-		}
-	}
-	s := &fakeAbout{}
-	err := (&FallbackAbout{Primary: ZenityAbout{}, Secondary: s}).Show(context.Background(), about.New("1"))
-	if err != nil || s.calls != 1 {
-		t.Errorf("no runner: err %v secondary calls %d", err, s.calls)
-	}
-}
-
-func TestFallbackAboutShouldFallbackOverridesTheDefaultRule(t *testing.T) {
-	boom := errors.New("x11: unsupported visual")
-	for name, c := range map[string]struct {
-		err    error
-		should func(error) bool
-		second bool
-	}{
-		"custom rule says yes":             {boom, func(error) bool { return true }, true},
-		"custom rule says no":              {boom, func(error) bool { return false }, false},
-		"dead display is not retried":      {ErrNoDisplay, func(err error) bool { return !errors.Is(err, ErrNoDisplay) }, false},
-		"default rule keeps zenity logic":  {ErrNoZenity, nil, true},
-		"default rule ignores other error": {boom, nil, false},
-	} {
-		p, s := &fakeAbout{err: c.err}, &fakeAbout{}
-		f := &FallbackAbout{Primary: p, Secondary: s, ShouldFallback: c.should}
-		_ = f.Show(context.Background(), about.New("1"))
-		if (s.calls > 0) != c.second {
-			t.Errorf("%s: secondary called %d times, want called=%v", name, s.calls, c.second)
-		}
 	}
 }

@@ -46,6 +46,27 @@ func ValidateImage(path string) error {
 	return fmt.Errorf("%w: %s", ErrNotImage, path)
 }
 
+// ErrNoZenity means zenity is not installed (or no runner is configured);
+// callers explain how to set the wallpaper in config.json instead.
+var ErrNoZenity = errors.New("zenity not found")
+
+// zenityStartFailure reports whether an exit-1 error means zenity never
+// showed a window: GTK says on stderr that it cannot open the display.
+func zenityStartFailure(err error) bool {
+	text := err.Error()
+	return strings.Contains(text, "cannot open display") ||
+		strings.Contains(text, "Failed to open display")
+}
+
+// errZenityStart marks zenity failing to show its window.
+var errZenityStart = errors.New("zenity could not start its window")
+
+// zenity --file-selection exit codes besides 0 that mean "closed, nothing to
+// do": 1 (Esc or the title-bar X), 5 (--timeout) and 255 (title-bar X or Esc
+// on other zenity versions). Exit 1 is also what GTK reports when it cannot
+// start (dead display); see zenityStartFailure.
+var zenityClosed = map[int]bool{1: true, 5: true, 255: true}
+
 // ZenityChooser asks for an image with zenity's file dialog. A missing
 // zenity yields an error wrapping ErrNoZenity.
 type ZenityChooser struct {
