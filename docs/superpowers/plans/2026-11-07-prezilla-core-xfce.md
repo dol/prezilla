@@ -12,11 +12,11 @@
 
 ## Global Constraints
 
-- Binary and app name: `prezilla`. Go module path: `prezilla`.
+- Technical names stay lowercase: binary and command `prezilla` (e.g. `prezilla toggle`), Go module path `prezilla`, package name, config/state/lock paths, icon name, desktop file name, repository URL. The product's DISPLAY name is `Prezilla` (capital P): About text and window, menu entries, tooltips, notification summaries and app name, tray title, desktop entry `Name=`, README and CHANGELOG prose, user-facing messages (user decision 2026-11-07, Task 19).
 - Switch IDs (exact): `icons`, `notifications`, `mute`, `minimize`, `wallpaper`.
 - Toggling twice must leave the system exactly as it was (restore original values, never forced defaults).
 - CLI subcommands (exact): `on`, `off`, `toggle`, `status`, `tray`, `version`, `about` (added in Task 14).
-- About info (exact, shared by CLI and tray): program name `prezilla`, comments `Presentation mode switcher`, license `Apache-2.0`, website `https://github.com/dol/prezilla` (assumed, same as `nfpm.yaml`), website label `github.com/dol/prezilla`, icon name `prezilla`. No GTK/cgo: the user wants one static binary. Task 14-15 shipped the `about` command plus a notification; after the user judged that half-baked, Task 18 adds a real About window through `zenity --info` (optional runtime tool, recommended by the packages, notification as fallback) — decided with the user on 2026-11-07 over a pure-Go X11 window and a native cgo GTK dialog. Exit codes: 0 success, 1 runtime error, 2 usage error.
+- About info (exact, shared by CLI and tray): program name `Prezilla`, comments `Presentation mode switcher`, license `Apache-2.0`, website `https://github.com/dol/prezilla` (assumed, same as `nfpm.yaml`), website label `github.com/dol/prezilla`, icon name `prezilla`. No GTK/cgo: the user wants one static binary. Task 14-15 shipped the `about` command plus a notification; after the user judged that half-baked, Task 18 adds a real About window through `zenity --info` (optional runtime tool, recommended by the packages, notification as fallback) — decided with the user on 2026-11-07 over a pure-Go X11 window and a native cgo GTK dialog. Exit codes: 0 success, 1 runtime error, 2 usage error.
 - Config: `os.UserConfigDir()/prezilla/config.json`. State: `os.UserStateDir`-style, i.e. `$XDG_STATE_HOME/prezilla/state.json`, falling back to `~/.local/state/prezilla/state.json`.
 - No dependencies beyond stdlib except `fyne.io/systray` (tray task only), `github.com/godbus/dbus/v5` (already in the graph via systray), and — added on the user's request (they do not want to install `pactl`/`wmctrl`) — `github.com/jfreymuth/pulse` (native PulseAudio/PipeWire-pulse protocol, Task 11) and `github.com/jezek/xgbutil` (EWMH over pure-Go X11, Task 12). No cgo anywhere.
 - Runtime requirement from the user: no extra packages beyond the XFCE session itself (`xfconf-query` ships with XFCE). `pactl`, `wmctrl` and `env` must NOT be required after Task 13.
@@ -43,7 +43,7 @@
 15. Saved state written by the tool-based version (`yes`/`no`, `<name>\tyes|no`, `on`/`off`) must still restore after upgrading to the native backends — Tasks 11 and 12.
 21. Left click on the tray icon toggles at once: a double click must not flip the mode twice into a surprise, an accidental click is undone by the next click, and a host that never calls the tapped callback still has the menu — Task 17.
 22. `zenity` missing, hung or killed: About falls back to the notification, then to a tooltip error; no zombie window after Quit; markup in the version string cannot inject links or break the dialog — Task 18.
-23. Friendlier errors must never hide the technical detail needed for a bug report (it stays in parentheses on stderr), must not change exit codes or `status` stdout, and must not tell the user to delete a file that would lose their saved originals unless the state is already unreadable — Task 19.
+23. Friendlier errors must never hide the technical detail needed for a bug report (it stays in parentheses on stderr), must not change exit codes or `status` stdout, and must not tell the user to delete a file that would lose their saved originals unless the state is already unreadable — Task 20.
 11. Installed package without its icon or desktop entry (missing size, wrong `Icon=` name) looks broken in menus and the panel: `scripts/check-install.sh` over a `DESTDIR` install and over the extracted `.deb` — Task 10.
 12. A packaged binary that reports `dev` instead of the release version, or a release built without the pinned tag version — Task 10 (`prezilla version` on the extracted deb).
 8. Deadline passes while the machine is suspended: next poll/watcher wake restores immediately — Task 3 (`DisableIfExpired` with injected clock) and Task 6 (watcher polls).
@@ -466,7 +466,26 @@ Added after the user judged the tray "half-baked" and a `better-interface` revie
 
 > **Revision (user, after Task 18 round 1):** the About window has a single `Close` button (`zenity --info --ok-label=Close`); the project link in the text (`<a href>` limited to http/https) is clickable and opens the website, so the `Open website` button, `system.Opener`/`ExecOpener`/`FakeOpener`, `system.WebsiteError` and the xdg-open/exo-open fallback are removed. Link activation could not be click-tested here and is for the user to confirm.
 
-### Task 19: Plain-language errors with a next step
+### Task 19: Display name "Prezilla"
+
+Requested by the user: write the product name with an uppercase P.
+
+**Files:**
+- Modify: `internal/about/about.go`, `internal/about/about_test.go`, `internal/tray/tray.go`, `internal/tray/tray_test.go`, `internal/system/aboutwindow.go` and its tests, `internal/system/notify.go`, `internal/system/prompt.go` and their tests, `internal/core/lock_unix.go` and its test, `packaging/prezilla.desktop`, `nfpm.yaml`, `README.md`, `CHANGELOG.md`, `internal/cli/cli_test.go` and any other test asserting the old display text
+
+**Rule (exact):** the DISPLAY name is `Prezilla` wherever a person reads the product's name; every technical identifier stays lowercase `prezilla`.
+- Changes to `Prezilla`: `about.Name`; therefore `about` text first line `Prezilla <version>`, the zenity title `About Prezilla` and the bold name in the markup, the notification summary `Prezilla <version>`; menu entry `About Prezilla` (and its hover text if it names the product); `systray.SetTitle("Prezilla")`; tooltip prefix `Prezilla: presentation mode on` / `Prezilla: presentation mode off` and the `Prezilla: <error>` tooltip form; the D-Bus notification app name (`"prezilla"` argument of `Notify`) becomes `"Prezilla"` in both `notify.go` and `prompt.go`; the lock error text `… waiting for another Prezilla process`; desktop entry `Name=Prezilla`; nfpm `description`/other display prose; README title and prose naming the product; CHANGELOG prose (`All notable changes to Prezilla`).
+- Stays lowercase: the command in text (`prezilla toggle`, `prezilla about`, `prezilla tray`, usage line), the binary and package name, `os.Args`-derived text, every path (`.../prezilla/config.json`, `state.json`, `.lock`), `about.IconName` `prezilla`, desktop file name, `nfpm.yaml` `name:`, `Icon=prezilla`, `Exec=prezilla tray`, the repository URL and website label (`github.com/dol/prezilla`), `ClientApplicationName("prezilla")`-style technical client names, Go package/module paths, log prefixes that name the executable.
+
+- [ ] **Step 1: Write failing tests:** update the exact-string tests first (`about` Text, tray tooltip strings, `aboutMessage`, zenity argv/markup for `about.New("1.2.3")`, notification app name where asserted, lock error text) and add `TestDisplayNameIsPrezilla` (about.Name == "Prezilla") plus a test that the lowercase command names still appear unchanged in the usage string and in the no-host error (`use "prezilla toggle" from the command line`).
+- [ ] **Step 2: Run** `go test ./...` — Expected: FAIL.
+- [ ] **Step 3: Implement** the renames per the rule; grep the tree for remaining user-visible `prezilla` text (`grep -rn '[Pp]rezilla' --include='*.go' --include='*.md' --include='*.desktop' --include='*.yaml' .` excluding `.git`, `.superpowers` and `docs/`) and classify every hit as display name or identifier, reporting the classification in the task report.
+- [ ] **Step 4: Run** `go vet ./... && go test -race -count=1 ./...` and `make package VERSION=0.0.0-test` — Expected: PASS; `dpkg-deb -I` still shows package `prezilla`; `desktop-file-validate packaging/prezilla.desktop` passes and `grep '^Name=' packaging/prezilla.desktop` prints `Name=Prezilla`.
+- [ ] **Step 5: Commit** `feat: display name is Prezilla`.
+
+---
+
+### Task 20: Plain-language errors with a next step
 
 **Files:**
 - Create: `internal/usererr/usererr.go`, `internal/usererr/usererr_test.go`; Modify: `internal/cli/cli.go`, `internal/cli/cli_test.go`, `internal/tray/tray.go`, `internal/tray/tray_test.go`, `cmd/prezilla/main.go`, `README.md`, `CHANGELOG.md`
