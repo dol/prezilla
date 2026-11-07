@@ -386,14 +386,15 @@ func TestToggleCooldownDropsFastSecondClick(t *testing.T) {
 		t.Error("click at +100ms accepted")
 	}
 	req := make(chan struct{}, 1)
-	requestToggle(g, req)
-	if len(req) != 0 {
-		t.Error("click during cooldown was queued")
+	if requestToggle(g, req) || len(req) != 0 {
+		t.Error("click during cooldown was queued or reported accepted")
 	}
 	clk.add(500 * time.Millisecond) // +600ms
-	requestToggle(g, req)
-	if len(req) != 1 {
+	if !requestToggle(g, req) || len(req) != 1 {
 		t.Error("click after cooldown not queued")
+	}
+	if !requestToggle(g, req) {
+		t.Error("a click merged into a queued one counts as accepted")
 	}
 	if !tryToggle(context.Background(), g, &tg, fn) {
 		t.Error("click at +600ms refused")

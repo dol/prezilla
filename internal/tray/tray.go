@@ -481,15 +481,18 @@ func Run(ctx context.Context, cfg Config) error {
 
 // requestToggle queues one toggle request without blocking. A click during
 // the cooldown is dropped, not queued; a request that arrives while one is
-// queued is merged into it.
-func requestToggle(g *clickGate, req chan<- struct{}) {
+// queued is merged into it. It reports whether the click was accepted
+// (queued or merged); a dropped checkbox click needs a refresh, because the
+// host may already have changed the checkmark.
+func requestToggle(g *clickGate, req chan<- struct{}) bool {
 	if !g.open() {
-		return
+		return false
 	}
 	select {
 	case req <- struct{}{}:
 	default:
 	}
+	return true
 }
 
 func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt *toggler, gate *clickGate,
@@ -612,7 +615,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	// The cooldown applies here and in requestToggle, never to Reset timer
 	// or the question items.
 	toggle := func() {
-		tryToggle(ctx, gate, tg, func(tctx context.Context) {
+		if !tryToggle(ctx, gate, tg, func(tctx context.Context) {
 			_, err := e.Toggle(tctx, timeout)
 			if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
 				err = errors.Join(err, serr)
@@ -624,7 +627,9 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 				fmt.Fprintln(os.Stderr, usererr.Explain(err))
 			}
 			refresh()
-		})
+		}) {
+			refresh() // cooldown or a toggle still running: re-send the real state
+		}
 	}
 
 	go func() {
@@ -644,7 +649,9 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 			case <-stopItem.ClickedCh:
 				coord.menuAnswer(ctx, keyEnd)
 			case <-modeItem.ClickedCh:
-				requestToggle(gate, toggleReq)
+				if !requestToggle(gate, toggleReq) {
+					refresh() // dropped click: put the real checkmark back now
+				}
 			case <-toggleReq:
 				toggle()
 			case <-resetItem.ClickedCh:
