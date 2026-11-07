@@ -30,7 +30,9 @@
 4. Multi-monitor / multi-workspace wallpaper: every `last-image` property restored, not just the first — Task 5.
 5. Corrupt or unreadable `state.json`: error naming the file path, no silent reset that would lose originals — Task 2.
 6. Running on an unsupported desktop (no `XDG_CURRENT_DESKTOP` match): CLI exits 1 with `unsupported desktop "<value>"` — Task 6.
-7. No tray host available (no StatusNotifier watcher): `prezilla tray` exits 1 with a hint to use the CLI instead of hanging — Task 7.
+7. No tray host available (no StatusNotifier watcher): `prezilla tray` exits 1 with a hint to use the CLI instead of hanging — Task 8.
+11. Installed package without its icon or desktop entry (missing size, wrong `Icon=` name) looks broken in menus and the panel: `scripts/check-install.sh` over a `DESTDIR` install and over the extracted `.deb` — Task 10.
+12. A packaged binary that reports `dev` instead of the release version, or a release built without the pinned tag version — Task 10 (`prezilla version` on the extracted deb).
 8. Deadline passes while the machine is suspended: next poll/watcher wake restores immediately — Task 3 (`DisableIfExpired` with injected clock) and Task 6 (watcher polls).
 9. Running `on --for 10m` while already active only moves the deadline; switches are not re-applied and originals are not overwritten — Task 3.
 10. Nobody runs the tray: the CLI alone must still enforce the timeout (detached `prezilla watch`), and `off` makes a leftover watcher exit — Task 6.
@@ -49,6 +51,8 @@
 - `internal/cli/cli.go` — `Run`.
 - `internal/tray/tray.go` — tray front-end.
 - `packaging/prezilla.desktop`, `README.md`.
+- `packaging/icons/**`, `scripts/render-icons.sh`, `internal/tray/icons/` — icon sources, rendered hicolor set, embedded tray icons (Task 7).
+- `Makefile`, `nfpm.yaml`, `CHANGELOG.md`, `LICENSE`, `.github/workflows/`, `scripts/check-install.sh` — build, install, packages, CI (Task 10).
 
 ---
 
@@ -191,20 +195,40 @@ Exact behavior:
 
 ---
 
-### Task 7: Tray front-end and autostart
+### Task 7: Icon assets
 
 **Files:**
-- Create: `internal/tray/tray.go`, `internal/tray/tray_test.go`, `packaging/prezilla.desktop`; Modify: `cmd/prezilla/main.go` (set `Deps.Tray`), `go.mod`
+- Create: `packaging/icons/prezilla.svg`, `packaging/icons/prezilla-tray-idle.svg`, `packaging/icons/prezilla-tray-active.svg`, `scripts/render-icons.sh`, `packaging/icons/hicolor/scalable/apps/prezilla.svg` (copy of `prezilla.svg`), `packaging/icons/hicolor/<S>x<S>/apps/prezilla.png` for S in 16, 22, 24, 32, 48, 64, 128, 256, 512, `internal/tray/icons/idle.png`, `internal/tray/icons/active.png`, `internal/tray/icons/icons.go`, `internal/tray/icons/icons_test.go`
+
+Design (decided; in the style of the sibling project `/home/dol/project/tunewise/icons/tunewise.png`: one bold flat silhouette, rounded joins, 512×512 viewBox, transparent background): a presentation screen (large rounded rectangle) on a two-legged easel, with a toggle switch (white pill, round knob) centred on the screen. App icon: teal `#1F9D8A` silhouette, white pill, knob right. Tray idle: grey `#8A8F98`, knob left. Tray active: green `#2ECC71`, knob right. No stroke or gap thinner than 32 units, so it stays readable at 16 px.
 
 **Interfaces:**
-- Consumes: `core.Engine` (`Toggle`, `Status`).
+- Produces: `package icons` (`internal/tray/icons`) with `//go:embed` variables `var Idle []byte` and `var Active []byte` (64×64 PNG each); the hicolor tree above, which later tasks install verbatim.
+
+- [ ] **Step 1: Write failing tests** in `icons_test.go`: `TestTrayIconsAre64x64PNG` (both decode, bounds 64×64), `TestTrayIconsDiffer` (bytes unequal), `TestTrayIconsAreNotBlank` (at least 5% of pixels have alpha > 0, and fewer than 80% so it is a glyph rather than a filled square), `TestHicolorSetIsComplete` (for each S listed above `../../../packaging/icons/hicolor/SxS/apps/prezilla.png` exists and decodes to S×S; scalable SVG exists and starts with `<svg` or `<?xml`).
+- [ ] **Step 2: Run** `go test ./internal/tray/icons/...` — Expected: FAIL.
+- [ ] **Step 3: Write the three SVGs** per the design above.
+- [ ] **Step 4: Write `scripts/render-icons.sh`** (bash, `set -euo pipefail`): renders every size with `rsvg-convert -w S -h S` into the hicolor tree, renders the two tray SVGs at 64×64 into `internal/tray/icons/`, copies the scalable SVG. The generated PNGs are committed, so building or packaging does not need `rsvg-convert` (package `librsvg2-bin`, already present on this machine).
+- [ ] **Step 5: Run** `bash scripts/render-icons.sh`, then implement `icons.go` with `go:embed idle.png active.png`.
+- [ ] **Step 6: Run** `go test ./internal/tray/icons/...` — Expected: PASS. Then look at the 16 px and 512 px PNGs and the idle/active pair (open them with the Read tool) and confirm the glyph is recognisable at 16 px; adjust the SVGs and re-render if not.
+- [ ] **Step 7: Commit** `feat: icon assets and embedded tray icons`.
+
+---
+
+### Task 8: Tray front-end and autostart
+
+**Files:**
+- Create: `internal/tray/tray.go`, `internal/tray/tray_test.go`, `packaging/prezilla.desktop`; Modify: `cmd/prezilla/main.go` (set `Deps.Tray`, replacing the "tray not built yet" stub), `go.mod`
+
+**Interfaces:**
+- Consumes: `core.Engine` (`Toggle`, `Status`, `DisableIfExpired`); `icons.Idle` / `icons.Active` from Task 7.
 - Produces:
   - `func Labels(active bool) (title, tooltip string)` — `("Presenting", "prezilla: presentation mode on")` / `("Not presenting", "prezilla: presentation mode off")`.
-  - `func Icon(active bool) []byte` — PNG bytes generated with `image/png` (grey circle inactive, green circle active), 22×22.
+  - `func Icon(active bool) []byte` — returns `icons.Active` when active, else `icons.Idle` (64×64 PNG).
   - `func Run(ctx context.Context, e *core.Engine, timeout time.Duration) error` — uses `fyne.io/systray`: each 2 s poll first calls `e.DisableIfExpired`, and the tooltip appends the remaining time (`, N min left`) when a deadline exists; one menu item showing `Labels(active).title` that calls `e.Toggle(ctx, timeout)` on click (errors shown by updating the tooltip and writing to stderr), a `Quit` item; polls `e.Status()` every 2 s so CLI changes are reflected in icon, title and tooltip.
 - `packaging/prezilla.desktop`: `[Desktop Entry]` with `Type=Application`, `Name=prezilla`, `Exec=prezilla tray`, `X-GNOME-Autostart-enabled=true`, `Icon=prezilla`, `Terminal=false`.
 
-- [ ] **Step 1: Write failing tests:** `TestLabelsActiveAndInactive` (exact strings above), `TestIconDecodesAs22x22PNG` for both states, `TestIconStatesDiffer`.
+- [ ] **Step 1: Write failing tests:** `TestLabelsActiveAndInactive` (exact strings above), `TestIconReturnsEmbeddedPNGPerState` (`Icon(true)` equals `icons.Active`, `Icon(false)` equals `icons.Idle`, and they differ).
 - [ ] **Step 2: Run** `go test ./internal/tray/...` — Expected: FAIL.
 - [ ] **Step 3: Implement** `Labels` and `Icon`; add dependency with `go get fyne.io/systray@latest`.
 - [ ] **Step 4: Run** `go test ./internal/tray/...` — Expected: PASS.
@@ -215,19 +239,41 @@ Exact behavior:
 
 ---
 
-### Task 8: README
+### Task 9: README
 
 **Files:**
 - Create: `README.md`
 
-- [ ] **Step 1: Write README** covering: what prezilla does (the five switches), CLI usage with exit codes, config file example (including `wallpaper`), XFCE prerequisites (`xfconf-query`, `pactl`, `wmctrl`, panel Status Notifier plugin), install (`go build`, copy `packaging/prezilla.desktop` to `~/.config/autostart/`), and a roadmap line: GNOME, KDE, Windows, macOS backends planned.
+- [ ] **Step 1: Write README** covering: what prezilla does (the five switches and the 30-minute auto-disable, `--for`, `timeout_minutes`), CLI usage with exit codes, config file example (including `wallpaper`), XFCE prerequisites (`xfconf-query`, `pactl` from `pulseaudio-utils`, `wmctrl`, panel Status Notifier plugin), install (`make install`; from-source and release-package sections are completed by Task 10), and a roadmap line: GNOME, KDE, Windows, macOS backends planned.
 - [ ] **Step 2: Commit** `docs: add README`.
+
+---
+
+### Task 10: Packaging, Makefile, changelog, CI
+
+**Files:**
+- Create: `Makefile`, `nfpm.yaml`, `CHANGELOG.md`, `LICENSE` (Apache-2.0, copy of `/home/dol/project/tunewise/LICENSE`), `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `scripts/check-install.sh`; Modify: `README.md` (install section), `.gitignore` (`/dist/`)
+
+**Interfaces:**
+- Consumes: `packaging/prezilla.desktop` (Task 8), `packaging/icons/hicolor/**` (Task 7), `main.version` ldflag (Task 6).
+- Produces `make` targets (exact names): `build` (→ `./prezilla`, version from `git describe --tags --always --dirty` passed as `-ldflags "-X main.version=$(VERSION)"`, override with `VERSION=`), `test`, `lint` (`gofmt -l` must print nothing and `go vet ./...`), `run`, `icons` (runs `scripts/render-icons.sh`), `install` (honours `PREFIX` default `/usr/local` and `DESTDIR`; installs `bin/prezilla`, `share/applications/prezilla.desktop`, the hicolor tree under `share/icons/hicolor/`), `uninstall`, `package` (builds `dist/prezilla_<version>_amd64.{deb,rpm,pkg.tar.zst}` with `nfpm package -p deb|rpm|archlinux` for linux/amd64), `ci` (`lint` + `test`), `clean`.
+- `nfpm.yaml`: name `prezilla`, arch `amd64`, version from env `${VERSION}`, license `Apache-2.0`, homepage `https://github.com/dol/prezilla` (assumed from the sibling project's `github.com/dol/tunewise`; edit if the repo lives elsewhere), contents installing the same files as `make install` under `/usr` plus `packaging/prezilla.desktop` also to `/etc/xdg/autostart/prezilla.desktop`; deb `depends`/`recommends`: `recommends: wmctrl, pulseaudio-utils` (rpm: `wmctrl, pulseaudio-utils`; archlinux: `wmctrl, libpulse`).
+- `scripts/check-install.sh <install-root>`: exits non-zero unless `<root>/usr*/bin/prezilla` exists and is executable, `.../share/applications/prezilla.desktop` exists and contains `Icon=prezilla`, and every hicolor size from Task 7 exists under `share/icons/hicolor/`.
+- `release.yml`: on tag `v*.*.*`, builds linux/amd64 and linux/arm64 binaries (`CGO_ENABLED=0`) with the tag version, runs `make package`, creates a tarball, and uploads everything to the GitHub release; `ci.yml`: on push/PR runs `make ci` and `make build` with Go from `go.mod`.
+
+- [ ] **Step 1: Write `scripts/check-install.sh`** (the acceptance check for the next steps) and run `bash scripts/check-install.sh /nonexistent` — Expected: exits non-zero.
+- [ ] **Step 2: Write `Makefile`**; run `make lint test build && ./prezilla version` — Expected: all pass, version output is not `dev` and matches `git describe`.
+- [ ] **Step 3: Verify install:** `make install PREFIX=/usr DESTDIR=$(mktemp -d)` then `bash scripts/check-install.sh <that dir>` — Expected: exit 0. Also `make uninstall PREFIX=/usr DESTDIR=<same dir>` leaves no prezilla files behind.
+- [ ] **Step 4: Write `nfpm.yaml`**; run `make package VERSION=0.0.0-test` — Expected: `.deb`, `.rpm` and `.pkg.tar.zst` in `dist/`; `dpkg-deb -c dist/prezilla_0.0.0-test_amd64.deb` lists `usr/bin/prezilla`, `usr/share/applications/prezilla.desktop`, `etc/xdg/autostart/prezilla.desktop` and all hicolor PNGs; extract the deb into a temp dir (`dpkg-deb -x`) and run `bash scripts/check-install.sh` on it — Expected: exit 0; `<extracted>/usr/bin/prezilla version` prints `0.0.0-test`.
+- [ ] **Step 5: Write `CHANGELOG.md`** (Keep a Changelog format as in the sibling project, `[Unreleased]` listing the CLI, tray, five XFCE switches, auto-disable timeout, icons, packaging), `LICENSE`, `.github/workflows/ci.yml` and `release.yml`; validate both workflow files parse as YAML (`python3 -c "import yaml,sys;[yaml.safe_load(open(f)) for f in sys.argv[1:]]" .github/workflows/*.yml`).
+- [ ] **Step 6: Update `README.md` install section** (release packages table: deb / rpm / pkg.tar.zst / tarball; from source: `make install`; autostart note) and add `/dist/` to `.gitignore` if not present.
+- [ ] **Step 7: Commit** `feat: packaging, makefile, changelog and ci`.
 
 ---
 
 ## Self-Review
 
-- **Spec coverage:** five TogglePresent switches → Tasks 4–5; tray → Task 7; CLI → Task 6; XFCE first → all backends; multi-platform → `core.Switch` + `platform.Detect/Switches` seam (other desktops explicitly deferred to separate plans).
+- **Spec coverage:** five TogglePresent switches → Tasks 4–5; tray → Task 8 (icons: Task 7); CLI → Task 6; packaging/Makefile/CI/changelog → Task 10; XFCE first → all backends; multi-platform → `core.Switch` + `platform.Detect/Switches` seam (other desktops explicitly deferred to separate plans).
 - **Types:** `Switch.Enable` returns `(string, error)` and `Disable(ctx, saved string)` in Tasks 2, 3, 4, 5 consistently; `xfce.Switches(r, cfg)` and `platform.Switches(desktop, r, cfg)` match in Task 6; `Deps.Tray` signature matches `tray.Run` wrapped in main.
-- **Review Focus:** items 1–2 → Task 3 tests; 3 → Task 4; 4 → Task 5; 5 → Task 2; 6 → Task 6; 7 → Task 7.
+- **Review Focus:** items 1–2 → Task 3 tests; 3 → Task 4; 4 → Task 5; 5 → Task 2; 6 → Task 6; 7 → Task 8; 8–10 → Tasks 3 and 6; 11–12 → Task 10.
 - **Risk to verify during execution:** exact `wmctrl -m` wording (`Showing the desktop mode`) and `xfconf-query` unset-property behavior on this machine; adjust fake outputs to real ones in Task 4/5 if they differ.
