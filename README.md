@@ -107,7 +107,7 @@ State (the saved original values and the deadline) is kept in `$XDG_STATE_HOME/p
 ## Troubleshooting
 - **A switch fails**: the error names the cause. The other switches are still applied; fix the cause and run `prezilla off`, then `on`.
   - `pulse: connect: ...`: no PulseAudio/PipeWire-pulse server is reachable. Check `PULSE_SERVER` and `$XDG_RUNTIME_DIR/pulse/native`.
-  - `x11: connect: ...`: no X display. `DISPLAY` is unset, for example in a Wayland-only session, which is not supported.
+  - `x11: connect: ...`: no reachable X display (`DISPLAY` is unset or unreachable). Wayland sessions are not supported.
   - `xfconf-query` not found: this is not an XFCE session.
 - **No tray icon**: `prezilla tray` reports that no StatusNotifier host was found. Add the Status Notifier plugin to the panel, or use `prezilla toggle` from a shortcut or terminal.
 - **`unsupported desktop`**: `XDG_CURRENT_DESKTOP` must contain `XFCE`.
@@ -116,7 +116,7 @@ State (the saved original values and the deadline) is kept in `$XDG_STATE_HOME/p
 ```bash
 go test ./...
 ```
-Tests never touch the real desktop: every switch talks to the system through the `system.Runner` interface, and tests substitute `system.FakeRunner`, which records command lines and replays canned output.
+Tests never touch the real desktop: icons, notifications and wallpaper use `system.Runner` (`xfconf-query`), mute uses `system.Audio`, minimize uses `system.Windows`, and the tray actions use `system.Notifier`, `system.Opener`, `system.ScreenSaver` and `system.Prompter`. Each interface has a fake (for example `system.FakeRunner`, which records command lines and replays canned output) that tests substitute.
 
 ## Roadmap
 GNOME, KDE, Windows and macOS backends are planned.
