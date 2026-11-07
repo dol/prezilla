@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - `prezilla` CLI: `on`, `off`, `toggle`, `status` and `version`.
 - `prezilla about` prints version, license and website.
+- Tray menu entries "About prezilla" (desktop notification) and "Project website" (opens the browser via `xdg-open` or `exo-open`).
 - System tray front-end (`prezilla tray`) with an autostart entry.
 - Five XFCE switches, each saving the original value and restoring it on `off`:
   desktop icons, notifications, audio mute, minimize windows and wallpaper.

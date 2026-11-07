@@ -68,7 +68,7 @@ prezilla version
 - `on` / `toggle` enable presentation mode with the configured timeout. `--for 45m` overrides it (Go duration syntax, e.g. `90s`, `1h30m`); `--for 0` means no auto-disable. Calling `on` while already active only replaces the deadline.
 - `off` restores everything and is a no-op when inactive.
 - `status` prints one of `inactive`, `active` or `active until HH:MM`, and first disables the mode if its deadline has passed.
-- `tray` runs the tray icon until you choose Quit.
+- `tray` runs the tray icon until you choose Quit. Its menu has the toggle item, **About prezilla** (shows version, license and website as a desktop notification) and **Project website** (opens the website in your browser). Errors from these two entries appear in the tooltip and on stderr. Presentation mode's do-not-disturb may hide the About notification while the mode is on. `xdg-open` or `exo-open` is needed only for the website link.
 - `about` prints the name, version, description, license and website. Like `version`, it needs no config and works on any desktop.
 - When a deadline is set, `on`/`toggle` and turning the mode on from the tray start a detached `prezilla watch` that restores everything at expiry, even after the tray quits (the tray also checks every 2 seconds).
 

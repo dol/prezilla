@@ -13,7 +13,9 @@ import (
 	"fyne.io/systray"
 	"github.com/godbus/dbus/v5"
 
+	"prezilla/internal/about"
 	"prezilla/internal/core"
+	"prezilla/internal/system"
 	"prezilla/internal/tray/icons"
 )
 
@@ -124,9 +126,77 @@ func spawnIfDeadline(status func() (core.State, error), spawn func() error) erro
 	return nil
 }
 
+// actionTimeout bounds one About or website action.
+const actionTimeout = 10 * time.Second
+
+// Config holds what the tray needs.
+type Config struct {
+	Engine  *core.Engine
+	Timeout time.Duration
+	// Spawn starts the detached deadline watcher after a toggle turns the mode on.
+	Spawn    func() error
+	About    about.Info
+	Notifier system.Notifier
+	Opener   system.Opener
+}
+
+// aboutMessage composes the About notification.
+func aboutMessage(info about.Info) (summary, body string) {
+	return "prezilla " + info.Version, info.Comments + "\nLicense: " + info.License + "\n" + info.Website
+}
+
+func aboutAction(n system.Notifier, info about.Info) func(context.Context) error {
+	return func(ctx context.Context) error {
+		summary, body := aboutMessage(info)
+		return n.Notify(ctx, summary, body, info.IconName)
+	}
+}
+
+func websiteAction(o system.Opener, info about.Info) func(context.Context) error {
+	return func(ctx context.Context) error { return o.Open(ctx, info.Website) }
+}
+
+// joinErrText joins two non-empty error texts with "; ".
+func joinErrText(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return a + "; " + b
+}
+
+// actionState holds the last About or website error for the tooltip.
+type actionState struct {
+	mu  sync.Mutex
+	err string
+}
+
+func (a *actionState) text() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.err
+}
+
+// run executes fn, records its error (cleared on success), prints it to
+// stderr and calls done.
+func (a *actionState) run(ctx context.Context, fn func(context.Context) error, done func()) {
+	err := fn(ctx)
+	a.mu.Lock()
+	a.err = ""
+	if err != nil {
+		a.err = err.Error()
+	}
+	a.mu.Unlock()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+	done()
+}
+
 // Run shows the tray icon and blocks until Quit is chosen or ctx is cancelled.
-// spawn starts the detached deadline watcher after a toggle turns the mode on.
-func Run(ctx context.Context, e *core.Engine, timeout time.Duration, spawn func() error) error {
+func Run(ctx context.Context, cfg Config) error {
 	if !hostAvailable() {
 		return errNoHost
 	}
@@ -134,20 +204,25 @@ func Run(ctx context.Context, e *core.Engine, timeout time.Duration, spawn func(
 	defer cancel()
 
 	var tg toggler
-	systray.Run(func() { onReady(ctx, cancel, e, timeout, spawn, &tg) }, cancel)
+	systray.Run(func() { onReady(ctx, cancel, cfg, &tg) }, cancel)
 	tg.wait()
 	return nil
 }
 
-func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, timeout time.Duration, spawn func() error, tg *toggler) {
+func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg *toggler) {
+	e, timeout, spawn := cfg.Engine, cfg.Timeout, cfg.Spawn
 	systray.SetIcon(Icon(false))
 	systray.SetTitle("prezilla")
 	toggle := systray.AddMenuItem("", "")
+	systray.AddSeparator()
+	aboutItem := systray.AddMenuItem("About prezilla", "Show version and license")
+	siteItem := systray.AddMenuItem("Project website", "Open the project website")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit", "Quit prezilla")
 
 	var mu sync.Mutex // guards lastErr and lastExpiryErr
 	var lastErr error
+	var actions actionState
 	var lastExpiryErr string
 
 	refresh := func() {
@@ -182,7 +257,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, tim
 				return remainingText(time.Now(), st.ExpiresAt)
 			}
 			return ""
-		}(), toggleText, expText)
+		}(), joinErrText(toggleText, actions.text()), expText)
 		systray.SetIcon(Icon(st.Active))
 		toggle.SetTitle(title)
 		systray.SetTooltip(tip)
@@ -213,9 +288,20 @@ func onReady(ctx context.Context, cancel context.CancelFunc, e *core.Engine, tim
 					}
 					refresh()
 				})
+			case <-aboutItem.ClickedCh:
+				go runAction(ctx, &actions, aboutAction(cfg.Notifier, cfg.About), refresh)
+			case <-siteItem.ClickedCh:
+				go runAction(ctx, &actions, websiteAction(cfg.Opener, cfg.About), refresh)
 			case <-quit.ClickedCh:
 				cancel()
 			}
 		}
 	}()
+}
+
+// runAction runs fn bounded by actionTimeout and stopped by Quit.
+func runAction(ctx context.Context, a *actionState, fn func(context.Context) error, done func()) {
+	actx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
+	a.run(actx, fn, done)
 }

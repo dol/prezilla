@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"prezilla/internal/about"
 	"prezilla/internal/cli"
 	"prezilla/internal/core"
 	"prezilla/internal/platform"
@@ -63,7 +64,14 @@ func run(ctx context.Context) int {
 	d.Engine = core.NewEngine(switches, core.NewStore(core.DefaultStatePath()), time.Now)
 	d.Engine.SetRestorers(all)
 	d.DefaultTimeout = cfg.Timeout()
-	d.Tray = func(ctx context.Context) error { return tray.Run(ctx, d.Engine, cfg.Timeout(), spawnWatcher) }
+	d.Tray = func(ctx context.Context) error {
+		return tray.Run(ctx, tray.Config{
+			Engine: d.Engine, Timeout: cfg.Timeout(), Spawn: spawnWatcher,
+			About:    about.New(version),
+			Notifier: system.DBusNotifier{},
+			Opener:   system.ExecOpener{Runner: system.ExecRunner{}},
+		})
+	}
 	return cli.Run(ctx, args, os.Stdout, os.Stderr, d)
 }
 

@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"prezilla/internal/about"
 	"prezilla/internal/core"
+	"prezilla/internal/system"
 	"prezilla/internal/tray/icons"
 )
 
@@ -145,5 +147,59 @@ func TestSpawnIfDeadline(t *testing.T) {
 	}
 	if err := spawnIfDeadline(func() (core.State, error) { return core.State{Active: true, ExpiresAt: deadline}, nil }, nil); err != nil {
 		t.Errorf("nil spawn: %v", err)
+	}
+}
+
+func TestAboutMessage(t *testing.T) {
+	info := about.New("1.2.3")
+	s, b := aboutMessage(info)
+	if s != "prezilla 1.2.3" {
+		t.Errorf("summary %q", s)
+	}
+	want := "Presentation mode switcher\nLicense: Apache-2.0\nhttps://github.com/dol/prezilla"
+	if b != want {
+		t.Errorf("body %q want %q", b, want)
+	}
+}
+
+func TestAboutAndWebsiteActions(t *testing.T) {
+	info := about.New("1.2.3")
+	n := &system.FakeNotifier{}
+	o := &system.FakeOpener{}
+	var a actionState
+	refreshed := 0
+	done := func() { refreshed++ }
+	a.run(context.Background(), aboutAction(n, info), done)
+	a.run(context.Background(), websiteAction(o, info), done)
+	if len(n.Calls) != 1 || n.Calls[0].Summary != "prezilla 1.2.3" || n.Calls[0].Icon != "prezilla" {
+		t.Errorf("notify calls %v", n.Calls)
+	}
+	if len(o.Calls) != 1 || o.Calls[0] != about.Website {
+		t.Errorf("open calls %v", o.Calls)
+	}
+	if a.text() != "" || refreshed != 2 {
+		t.Errorf("text %q refreshed %d", a.text(), refreshed)
+	}
+
+	n.Err = errors.New("no bus")
+	a.run(context.Background(), aboutAction(n, info), done)
+	if a.text() != "no bus" {
+		t.Errorf("text %q", a.text())
+	}
+	if tip := tooltip(false, "", a.text(), ""); tip != "prezilla: presentation mode off (error: no bus)" {
+		t.Errorf("tooltip %q", tip)
+	}
+	a.run(context.Background(), websiteAction(o, info), done)
+	if a.text() != "" {
+		t.Errorf("success should clear, got %q", a.text())
+	}
+}
+
+func TestJoinErrText(t *testing.T) {
+	cases := [][3]string{{"", "", ""}, {"a", "", "a"}, {"", "b", "b"}, {"a", "b", "a; b"}}
+	for _, c := range cases {
+		if got := joinErrText(c[0], c[1]); got != c[2] {
+			t.Errorf("%q+%q = %q", c[0], c[1], got)
+		}
 	}
 }
