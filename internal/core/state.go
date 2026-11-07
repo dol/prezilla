@@ -64,32 +64,39 @@ func (s *Store) Save(st State) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create state dir %s: %w", dir, err)
+	return writeFileAtomic(s.path, data, 0o700, 0o600, "state")
+}
+
+// writeFileAtomic writes data to path through an fsynced temp file in the
+// same directory and a rename, creating the directory with dirPerm. what
+// names the file in errors.
+func writeFileAtomic(path string, data []byte, dirPerm, perm os.FileMode, what string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, dirPerm); err != nil {
+		return fmt.Errorf("create %s dir %s: %w", what, dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".state-*.tmp")
+	tmp, err := os.CreateTemp(dir, "."+what+"-*.tmp")
 	if err != nil {
-		return fmt.Errorf("write state %s: %w", s.path, err)
+		return fmt.Errorf("write %s %s: %w", what, path, err)
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return fmt.Errorf("write state %s: %w", s.path, err)
+		return fmt.Errorf("write %s %s: %w", what, path, err)
 	}
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(perm); err != nil {
 		tmp.Close()
-		return fmt.Errorf("write state %s: %w", s.path, err)
+		return fmt.Errorf("write %s %s: %w", what, path, err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		return fmt.Errorf("write state %s: %w", s.path, err)
+		return fmt.Errorf("write %s %s: %w", what, path, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write state %s: %w", s.path, err)
+		return fmt.Errorf("write %s %s: %w", what, path, err)
 	}
-	if err := os.Rename(tmp.Name(), s.path); err != nil {
-		return fmt.Errorf("write state %s: %w", s.path, err)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("write %s %s: %w", what, path, err)
 	}
 	syncDir(dir)
 	return nil

@@ -13,6 +13,9 @@ const (
 	IDWallpaper     = "wallpaper"
 )
 
+// SwitchOrder is the canonical order of switches in menus and config files.
+var SwitchOrder = []string{IDIcons, IDNotifications, IDPresentation, IDMute, IDMinimize, IDWallpaper}
+
 // Switch is one reversible presentation-mode toggle.
 type Switch interface {
 	ID() string
