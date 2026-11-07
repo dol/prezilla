@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jezek/xgb/xproto"
 )
 
 func TestX11WindowsNoDisplayErrorsFast(t *testing.T) {
@@ -111,5 +113,68 @@ func TestFakeWindowsRecordsAndUpdates(t *testing.T) {
 	}
 	if len(f.Calls) != 2 {
 		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestFakeWindowsSetErrOnce(t *testing.T) {
+	f := &FakeWindows{SetErrOnce: errors.New("once")}
+	if err := f.SetShowingDesktop(context.Background(), true); err == nil || f.Showing {
+		t.Fatalf("first set: err %v showing %v", err, f.Showing)
+	}
+	if err := f.SetShowingDesktop(context.Background(), true); err != nil || !f.Showing {
+		t.Fatalf("second set: err %v showing %v", err, f.Showing)
+	}
+}
+
+func TestSendShowingDesktopInternsBeforeContextCheck(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var interned, sent int
+	intern := func(name string) (xproto.Atom, error) {
+		interned++
+		if name != "_NET_SHOWING_DESKTOP" {
+			t.Errorf("interned %q", name)
+		}
+		cancel() // the caller gives up during the round trip
+		return 42, nil
+	}
+	send := func(xproto.Atom, int) error { sent++; return nil }
+	err := sendShowingDesktop(ctx, true, intern, send)
+	if !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), "x11:") {
+		t.Fatalf("err = %v", err)
+	}
+	if interned != 1 || sent != 0 {
+		t.Fatalf("interned %d sent %d", interned, sent)
+	}
+}
+
+func TestSendShowingDesktopSendsResolvedAtom(t *testing.T) {
+	for _, show := range []bool{true, false} {
+		var gotAtom xproto.Atom
+		gotN := -1
+		err := sendShowingDesktop(context.Background(), show,
+			func(string) (xproto.Atom, error) { return 42, nil },
+			func(a xproto.Atom, n int) error { gotAtom, gotN = a, n; return nil })
+		want := 0
+		if show {
+			want = 1
+		}
+		if err != nil || gotAtom != 42 || gotN != want {
+			t.Errorf("show %v: err %v atom %d n %d", show, err, gotAtom, gotN)
+		}
+	}
+}
+
+func TestSendShowingDesktopErrors(t *testing.T) {
+	err := sendShowingDesktop(context.Background(), true,
+		func(string) (xproto.Atom, error) { return 0, errors.New("intern boom") },
+		func(xproto.Atom, int) error { t.Error("sent"); return nil })
+	if err == nil || !strings.HasPrefix(err.Error(), "x11: set showing desktop:") || !strings.Contains(err.Error(), "intern boom") {
+		t.Errorf("intern err = %v", err)
+	}
+	err = sendShowingDesktop(context.Background(), true,
+		func(string) (xproto.Atom, error) { return 42, nil },
+		func(xproto.Atom, int) error { return errors.New("send boom") })
+	if err == nil || !strings.HasPrefix(err.Error(), "x11: set showing desktop:") || !strings.Contains(err.Error(), "send boom") {
+		t.Errorf("send err = %v", err)
 	}
 }

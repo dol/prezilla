@@ -8,7 +8,7 @@ import (
 
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgbutil"
-	"github.com/jezek/xgbutil/ewmh"
+	"github.com/jezek/xgbutil/xevent"
 	"github.com/jezek/xgbutil/xprop"
 )
 
@@ -29,7 +29,7 @@ func (w X11Windows) timeout() time.Duration {
 // withX runs fn with a fresh connection, bounded by ctx and the timeout. The
 // library is not context-aware, so fn runs in a goroutine; if it outlives the
 // bound it finishes (and closes its connection) in the background.
-func withX[T any](parent context.Context, w X11Windows, fn func(*xgbutil.XUtil) (T, error)) (T, error) {
+func withX[T any](parent context.Context, w X11Windows, fn func(context.Context, *xgbutil.XUtil) (T, error)) (T, error) {
 	var zero T
 	if err := parent.Err(); err != nil {
 		return zero, fmt.Errorf("x11: %w", err)
@@ -60,7 +60,7 @@ func withX[T any](parent context.Context, w X11Windows, fn func(*xgbutil.XUtil) 
 			ch <- result{err: fmt.Errorf("x11: %w", err)}
 			return
 		}
-		v, err := fn(xu)
+		v, err := fn(ctx, xu)
 		ch <- result{v, err}
 	}()
 	select {
@@ -76,7 +76,7 @@ func withX[T any](parent context.Context, w X11Windows, fn func(*xgbutil.XUtil) 
 
 // ShowingDesktop implements Windows by reading _NET_SHOWING_DESKTOP.
 func (w X11Windows) ShowingDesktop(ctx context.Context) (bool, error) {
-	return withX(ctx, w, func(xu *xgbutil.XUtil) (bool, error) {
+	return withX(ctx, w, func(_ context.Context, xu *xgbutil.XUtil) (bool, error) {
 		v, err := showingDesktopGet(xu)
 		if err != nil {
 			return false, fmt.Errorf("x11: read showing desktop: %w", err)
@@ -112,18 +112,45 @@ func showingDesktopGet(xu *xgbutil.XUtil) (bool, error) {
 // SetShowingDesktop implements Windows by asking the window manager through
 // the _NET_SHOWING_DESKTOP client message.
 func (w X11Windows) SetShowingDesktop(ctx context.Context, show bool) error {
-	_, err := withX(ctx, w, func(xu *xgbutil.XUtil) (struct{}, error) {
-		// ewmh.ShowingDesktopReq panics (it passes uint where
-		// NewClientMessage wants int), so send the same message ourselves:
-		// to the root window with SubstructureNotify|SubstructureRedirect.
-		n := 0
-		if show {
-			n = 1
+	_, err := withX(ctx, w, func(ctx context.Context, xu *xgbutil.XUtil) (struct{}, error) {
+		intern := func(name string) (xproto.Atom, error) { return xprop.Atm(xu, name) }
+		send := func(atom xproto.Atom, n int) error {
+			// ewmh.ShowingDesktopReq panics (it passes uint where
+			// NewClientMessage wants int), and ewmh.ClientEvent interns the
+			// atom itself, so build the message from the resolved atom and
+			// send it to the root window with
+			// SubstructureNotify|SubstructureRedirect.
+			cm, err := xevent.NewClientMessage(32, xu.RootWin(), atom, n)
+			if err != nil {
+				return err
+			}
+			mask := xproto.EventMaskSubstructureNotify | xproto.EventMaskSubstructureRedirect
+			return xevent.SendRootEvent(xu, cm, uint32(mask))
 		}
-		if err := ewmh.ClientEvent(xu, xu.RootWin(), "_NET_SHOWING_DESKTOP", n); err != nil {
-			return struct{}{}, fmt.Errorf("x11: set showing desktop: %w", err)
-		}
-		return struct{}{}, nil
+		return struct{}{}, sendShowingDesktop(ctx, show, intern, send)
 	})
 	return err
+}
+
+// sendShowingDesktop resolves the _NET_SHOWING_DESKTOP atom (an X round
+// trip), then re-checks ctx, and only then sends the request, so a caller
+// that gave up during the round trip never has the desktop shown or hidden
+// behind its back.
+func sendShowingDesktop(ctx context.Context, show bool,
+	intern func(name string) (xproto.Atom, error), send func(atom xproto.Atom, n int) error) error {
+	atom, err := intern("_NET_SHOWING_DESKTOP")
+	if err != nil {
+		return fmt.Errorf("x11: set showing desktop: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("x11: %w", err)
+	}
+	n := 0
+	if show {
+		n = 1
+	}
+	if err := send(atom, n); err != nil {
+		return fmt.Errorf("x11: set showing desktop: %w", err)
+	}
+	return nil
 }

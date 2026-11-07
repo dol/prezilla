@@ -21,6 +21,13 @@ func (s minimize) Enable(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("read showing desktop: %w", err)
 	}
 	if err := s.w.SetShowingDesktop(ctx, true); err != nil {
+		if !showing {
+			// The request may still have reached the window manager while
+			// nothing is saved, so undo it best effort.
+			fix, cancel := context.WithTimeout(context.WithoutCancel(ctx), core.CorrectiveTimeout)
+			_ = s.w.SetShowingDesktop(fix, false)
+			cancel()
+		}
 		return "", fmt.Errorf("show desktop: %w", err)
 	}
 	if showing {

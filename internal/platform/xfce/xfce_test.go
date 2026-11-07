@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"prezilla/internal/core"
 	"prezilla/internal/system"
 )
 
@@ -343,6 +345,49 @@ func TestMinimizeSetFailureIsReported(t *testing.T) {
 	f := &system.FakeWindows{SetErr: errors.New("nope")}
 	if _, err := NewMinimize(f).Enable(ctx); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestMinimizeSetFailureTriggersCorrectiveRestore(t *testing.T) {
+	f := &system.FakeWindows{SetErrOnce: errors.New("timed out")}
+	saved, err := NewMinimize(f).Enable(ctx)
+	if err == nil || !strings.Contains(err.Error(), "timed out") || saved != "" {
+		t.Fatalf("got (%q, %v)", saved, err)
+	}
+	want := []string{"ShowingDesktop", "SetShowingDesktop true", "SetShowingDesktop false"}
+	if !slices.Equal(f.Calls, want) {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMinimizeCorrectiveRunsAfterCallerGaveUp(t *testing.T) {
+	f := &system.FakeWindows{SetErrOnce: errors.New("x11: context canceled")}
+	cctx, cancel := context.WithCancel(ctx)
+	f.OnSet = func(c context.Context, show bool) {
+		if show {
+			cancel()
+		} else if c.Err() != nil {
+			t.Errorf("corrective ran on a done context: %v", c.Err())
+		} else if dl, ok := c.Deadline(); !ok || time.Until(dl) > core.CorrectiveTimeout {
+			t.Errorf("corrective deadline %v %v", dl, ok)
+		}
+	}
+	if _, err := NewMinimize(f).Enable(cctx); err == nil {
+		t.Fatal("expected error")
+	}
+	if n := len(f.Calls); n != 3 {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestMinimizeSetFailureWhenAlreadyShowingHasNoCorrection(t *testing.T) {
+	f := &system.FakeWindows{Showing: true, SetErrOnce: errors.New("boom")}
+	if _, err := NewMinimize(f).Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	want := []string{"ShowingDesktop", "SetShowingDesktop true"}
+	if !slices.Equal(f.Calls, want) {
+		t.Fatalf("calls %v", f.Calls)
 	}
 }
 
