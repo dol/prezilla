@@ -10,7 +10,7 @@ back when you are done. XFCE on X11 first; other desktops are planned.
   - `notifications`: enables do-not-disturb in `xfce4-notifyd`
   - `mute`: mutes the default audio sink (only unmutes if it was not muted before)
   - `minimize`: shows the desktop (minimizes all windows)
-  - `wallpaper`: swaps the wallpaper on every monitor/workspace; off unless `wallpaper` is set in the config
+  - `wallpaper`: swaps the wallpaper on every monitor/workspace; off unless `wallpaper` is set in the config to a path to an image file
 - Auto-disable after 30 minutes by default (`timeout_minutes`, or `--for` per call), enforced by a detached background watcher
 - System tray icon with a toggle and remaining time in the tooltip; the same actions are available from the CLI
 
@@ -28,22 +28,36 @@ sudo apt install xfconf pulseaudio-utils wmctrl
 
 ## Installation
 
+### Release packages
+Download from the project's GitHub releases page:
+
+| Format | File | Install |
+| --- | --- | --- |
+| Debian/Ubuntu | `prezilla_<version>_amd64.deb` | `sudo apt install ./prezilla_<version>_amd64.deb` |
+| Fedora/openSUSE | `prezilla_<version>_amd64.rpm` | `sudo dnf install ./prezilla_<version>_amd64.rpm` |
+| Arch | `prezilla_<version>_amd64.pkg.tar.zst` | `sudo pacman -U prezilla_<version>_amd64.pkg.tar.zst` |
+| Any Linux | `prezilla_<version>_linux_{amd64,arm64}.tar.gz` | unpack and copy `prezilla` onto your `PATH` |
+
+The packages install the binary, the desktop entry, the icons and an autostart entry
+(`/etc/xdg/autostart/prezilla.desktop`), so the tray starts at login.
+
 ### From source
 Needs Go 1.23+.
 ```bash
-git clone https://github.com/dol/prezilla
+git clone <repo-url>
 cd prezilla
-go build -o prezilla ./cmd/prezilla
-sudo install -m 755 prezilla /usr/local/bin/prezilla   # any directory on your PATH
+make build                          # ./prezilla
+sudo make install                   # PREFIX=/usr/local by default; honours DESTDIR
 ```
-
-`make install` and release packages arrive with the packaging work.
+`make uninstall` removes the installed files. Other targets: `lint`, `test`, `package` (needs `nfpm`).
 
 ### Autostart the tray
+Packages already autostart the tray at login. After `make install` or a tarball install, enable it per user:
 ```bash
 mkdir -p ~/.config/autostart
 cp packaging/prezilla.desktop ~/.config/autostart/
 ```
+If the panel's StatusNotifier host is not up yet when autostart runs, `prezilla tray` can exit 1. Log in again or start `prezilla tray` from the panel's launcher; the CLI works regardless.
 The application icon lives in `packaging/icons/`.
 
 ## Usage
@@ -89,7 +103,7 @@ With a wallpaper (setting `wallpaper` adds the `wallpaper` switch automatically)
 State (the saved original values and the deadline) is kept in `$XDG_STATE_HOME/prezilla/state.json`, by default `~/.local/state/prezilla/state.json`. Delete it only if you do not need the originals back.
 
 ## Troubleshooting
-- **A tool is missing or fails**: the error names the tool (for example `pactl: ...`). The other switches are still applied; install the tool and run `prezilla off` / `on` again.
+- **A tool is missing or fails**: the error names the tool (for example `pactl: ...`). The other switches are still applied; install the tool and run `prezilla off`, then `on`.
 - **No tray icon**: `prezilla tray` reports that no StatusNotifier host was found. Add the Status Notifier plugin to the panel, or use `prezilla toggle` from a shortcut or terminal.
 - **`unsupported desktop`**: `XDG_CURRENT_DESKTOP` must contain `XFCE`.
 

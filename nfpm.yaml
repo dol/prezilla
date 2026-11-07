@@ -1,0 +1,60 @@
+name: prezilla
+arch: amd64
+platform: linux
+version: ${VERSION}
+section: utils
+maintainer: Dominic Lüchinger <dominic@snowgarden.ch>
+description: Toggle presentation mode (icons, notifications, mute, minimize, wallpaper) from a tray icon or CLI.
+# ASSUMPTION: no git remote exists yet; inferred from the sibling project github.com/dol/tunewise.
+homepage: https://github.com/dol/prezilla
+license: Apache-2.0
+
+overrides:
+  deb:
+    recommends: [wmctrl, pulseaudio-utils]
+  rpm:
+    recommends: [wmctrl, pulseaudio-utils]
+  archlinux:
+    recommends: [wmctrl, libpulse]
+
+contents:
+  - src: dist/prezilla-linux-amd64
+    dst: /usr/bin/prezilla
+    file_info: {mode: 0755}
+  - src: packaging/prezilla.desktop
+    dst: /usr/share/applications/prezilla.desktop
+    file_info: {mode: 0644}
+  - src: packaging/prezilla.desktop
+    dst: /etc/xdg/autostart/prezilla.desktop
+    type: config|noreplace
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/128x128/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/128x128/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/16x16/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/16x16/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/22x22/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/22x22/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/24x24/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/24x24/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/256x256/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/256x256/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/32x32/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/32x32/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/48x48/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/48x48/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/512x512/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/512x512/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/64x64/apps/prezilla.png
+    dst: /usr/share/icons/hicolor/64x64/apps/prezilla.png
+    file_info: {mode: 0644}
+  - src: packaging/icons/hicolor/scalable/apps/prezilla.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/prezilla.svg
+    file_info: {mode: 0644}

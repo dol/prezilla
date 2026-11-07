@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
+
+      - name: Test
+        run: make ci
+
+      - name: Build packages (linux/amd64)
+        run: make package VERSION=${{ steps.get_version.outputs.version }}
+
+      - name: Build tarballs (linux/amd64, linux/arm64)
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          for arch in amd64 arm64; do
+            name="prezilla_${VERSION}_linux_${arch}"
+            mkdir -p "dist/${name}"
+            CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" \
+              go build -ldflags "-X main.version=${VERSION}" -o "dist/${name}/prezilla" ./cmd/prezilla
+            cp -r packaging LICENSE README.md "dist/${name}/"
+            tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          done
+
+      - name: Extract changelog entry
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          awk -v v="[${VERSION}]" 'index($0, "## " v) == 1 {flag=1; next} /^## \[/ {flag=0} flag' CHANGELOG.md | sed '/^$/d' > release-notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          prerelease=""
+          case "${VERSION}" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "${GITHUB_REF_NAME}" ${prerelease} \
+            --title "prezilla ${VERSION}" \
+            --notes-file release-notes.md \
+            dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.tar.gz
