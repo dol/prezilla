@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -46,7 +47,18 @@ func (e *Engine) Enable(ctx context.Context, timeout time.Duration) error {
 	}
 	st.Active = len(st.Saved) > 0
 	if err := e.store.Save(st); err != nil {
-		errs = append(errs, err)
+		// Originals would be lost: best-effort roll back what was applied.
+		errs = append(errs, fmt.Errorf("save state: %w", err))
+		for i := len(e.switches) - 1; i >= 0; i-- {
+			sw := e.switches[i]
+			saved, ok := st.Saved[sw.ID()]
+			if !ok {
+				continue
+			}
+			if derr := sw.Disable(ctx, saved); derr != nil {
+				errs = append(errs, fmt.Errorf("rollback %s: %w", sw.ID(), derr))
+			}
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -75,10 +87,16 @@ func (e *Engine) Disable(ctx context.Context) error {
 		}
 		delete(st.Saved, sw.ID())
 	}
+	var orphans []string
 	for id := range st.Saved {
 		if !known[id] {
-			errs = append(errs, fmt.Errorf("%s: no matching switch configured", id))
+			orphans = append(orphans, id)
 		}
+	}
+	sort.Strings(orphans)
+	for _, id := range orphans {
+		errs = append(errs, fmt.Errorf("%s: no configured switch to restore", id))
+		delete(st.Saved, id)
 	}
 	st.Active = len(st.Saved) > 0
 	if !st.Active {

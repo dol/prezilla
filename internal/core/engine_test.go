@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -147,16 +148,46 @@ func TestDisableFailureKeepsEntryAndStaysActive(t *testing.T) {
 	}
 }
 
-func TestDisableUnknownSwitchIDReturnsErrorAndKeepsEntry(t *testing.T) {
+func TestDisableUnknownSwitchIDIsDroppedAndReported(t *testing.T) {
 	a := &fakeSwitch{id: "a", savedVal: "1"}
 	e, store, _ := newTestEngine(t, a)
 	store.Save(State{Active: true, Saved: map[string]string{"a": "1", "gone": "x"}})
 	err := e.Disable(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "gone") {
+	if err == nil || !strings.Contains(err.Error(), "gone: no configured switch to restore") {
 		t.Fatalf("err = %v", err)
 	}
 	st, _ := e.Status()
-	if !st.Active || st.Saved["gone"] != "x" || len(st.Saved) != 1 {
+	if _, ok := st.Saved["gone"]; ok || st.Active || len(st.Saved) != 0 {
+		t.Fatalf("state = %+v", st)
+	}
+	if err := e.Disable(context.Background()); err != nil {
+		t.Fatalf("second Disable = %v", err)
+	}
+}
+
+func TestEnableSaveFailureRollsBackSwitches(t *testing.T) {
+	dir := t.TempDir()
+	ro := filepath.Join(dir, "ro")
+	if err := os.Mkdir(ro, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(ro, 0o700) })
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	a := &fakeSwitch{id: "a", savedVal: "1"}
+	b := &fakeSwitch{id: "b", savedVal: "2"}
+	bad := NewStore(filepath.Join(ro, "state.json"))
+	err := NewEngine([]Switch{a, b}, bad, time.Now).Enable(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "save state") {
+		t.Fatalf("err = %v", err)
+	}
+	if a.disabled != 1 || a.gotSaved != "1" || b.disabled != 1 || b.gotSaved != "2" {
+		t.Fatalf("a=%d/%q b=%d/%q", a.disabled, a.gotSaved, b.disabled, b.gotSaved)
+	}
+	good := NewStore(filepath.Join(dir, "state.json"))
+	st, _ := NewEngine([]Switch{a, b}, good, time.Now).Status()
+	if st.Active {
 		t.Fatalf("state = %+v", st)
 	}
 }
