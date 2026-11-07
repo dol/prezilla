@@ -99,6 +99,8 @@ type itemState struct {
 // after their role. About and Quit never change.
 type menuModel struct {
 	Keep, Stop, Mode, Timer, Reset itemState
+	// Quit is not part of ordered: it never hides and is always last.
+	Quit itemState
 }
 
 // ordered returns the items in menu order.
@@ -136,7 +138,20 @@ func menuState(active bool, timer string, remaining time.Duration, pending bool,
 			Tooltip: fmt.Sprintf("Sets the end time to %d minutes from now.", mins),
 			Visible: hasDeadline && remaining < step && !pending, Enabled: true,
 		},
+		Quit: itemState{Title: quitTitle(active), Tooltip: quitTooltip, Visible: true, Enabled: true},
 	}
+}
+
+// quitTooltip is Quit's hover text; the title carries the consequence too,
+// because the library does not export hover text on Linux.
+const quitTooltip = "Closes the tray icon; presentation mode stays as it is."
+
+// quitTitle says in the title itself that Quit leaves the mode as it is.
+func quitTitle(active bool) string {
+	if active {
+		return "Quit (presentation stays on)"
+	}
+	return "Quit"
 }
 
 // toggleCooldown is how long after an accepted toggle further toggle clicks
@@ -490,13 +505,14 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	systray.AddSeparator()
 	aboutItem := systray.AddMenuItem("About Prezilla", "Shows the version, license and website.")
 	systray.AddSeparator()
-	quit := systray.AddMenuItem("Quit", "Closes the tray icon; presentation mode stays as it is.")
+	quit := systray.AddMenuItem(m.Quit.Title, m.Quit.Tooltip)
 
 	var mu sync.Mutex // guards lastErr, lastExpiryErr and the visibility flags
 	var lastErr error
 	var actions, extendErr actionState
 	var lastExpiryErr string
 	var timerShown, resetShown, promptShown bool
+	quitShown := m.Quit.Title // guarded by mu
 
 	refresh := func() {
 		opCtx, opCancel := context.WithTimeout(ctx, core.OperationTimeout)
@@ -541,6 +557,10 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		if m.Timer.Visible != timerShown {
 			timerShown = m.Timer.Visible
 			setVisible(timerItem, timerShown)
+		}
+		if m.Quit.Title != quitShown {
+			quitShown = m.Quit.Title
+			quit.SetTitle(quitShown)
 		}
 		if m.Reset.Visible != resetShown {
 			resetShown = m.Reset.Visible

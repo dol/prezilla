@@ -747,3 +747,17 @@ func TestExpiryNoteDeduplicatesOnExplainedText(t *testing.T) {
 		t.Errorf("cleared: %+v", c)
 	}
 }
+
+// systray exports no hover text on Linux, so the title itself says that
+// quitting leaves presentation mode on.
+func TestMenuStateQuitTitle(t *testing.T) {
+	for _, c := range []struct {
+		active bool
+		want   string
+	}{{false, "Quit"}, {true, "Quit (presentation stays on)"}} {
+		q := menuState(c.active, "", 0, false, testTimeout).Quit
+		if q.Title != c.want || !q.Visible || !q.Enabled || q.Tooltip != quitTooltip {
+			t.Errorf("active %v: %+v", c.active, q)
+		}
+	}
+}
