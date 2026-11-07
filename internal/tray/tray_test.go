@@ -236,27 +236,31 @@ func visibleTitles(m menuModel) []string {
 }
 
 func TestMenuStateTable(t *testing.T) {
-	const timer = "Ends 12:12 · 12 min left"
+	const timer = "Ends 12:12 · 12\u00a0min left"
+	const left = 12 * time.Minute
 	cases := []struct {
 		name        string
 		active      bool
 		timer       string
+		remaining   time.Duration
 		pending     bool
 		step        time.Duration
 		wantVisible []string
 		wantChecked bool
 	}{
-		{"inactive", false, "", false, testTimeout, []string{"Presentation mode"}, false},
-		{"active without deadline", true, "", false, testTimeout, []string{"Presentation mode"}, true},
-		{"active with deadline", true, timer, false, testTimeout,
-			[]string{"Presentation mode", timer, "Extend by 30 min"}, true},
-		{"pending question", true, timer, true, testTimeout,
-			[]string{"Keep presenting (+30 min)", "Stop presenting", "Presentation mode", timer, "Extend by 30 min"}, true},
-		{"step 45", true, timer, true, 45 * time.Minute,
-			[]string{"Keep presenting (+45 min)", "Stop presenting", "Presentation mode", timer, "Extend by 45 min"}, true},
+		{"inactive", false, "", 0, false, testTimeout, []string{"Presentation mode"}, false},
+		{"active without deadline", true, "", 0, false, testTimeout, []string{"Presentation mode"}, true},
+		{"active with deadline", true, timer, left, false, testTimeout,
+			[]string{"Presentation mode", timer, "Reset timer to 30 min"}, true},
+		{"pending question hides reset", true, timer, left, true, testTimeout,
+			[]string{"Keep presenting for 30 min", "Stop presenting", "Presentation mode", timer}, true},
+		{"step 45", true, timer, left, true, 45 * time.Minute,
+			[]string{"Keep presenting for 45 min", "Stop presenting", "Presentation mode", timer}, true},
+		{"step 45 reset", true, timer, left, false, 45 * time.Minute,
+			[]string{"Presentation mode", timer, "Reset timer to 45 min"}, true},
 	}
 	for _, c := range cases {
-		m := menuState(c.active, c.timer, c.pending, c.step)
+		m := menuState(c.active, c.timer, c.remaining, c.pending, c.step)
 		if got := visibleTitles(m); !reflect.DeepEqual(got, c.wantVisible) {
 			t.Errorf("%s: visible %q want %q", c.name, got, c.wantVisible)
 		}
@@ -269,12 +273,12 @@ func TestMenuStateTable(t *testing.T) {
 		if m.Timer.Enabled {
 			t.Errorf("%s: timer line enabled", c.name)
 		}
-		for _, it := range []itemState{m.Keep, m.Stop, m.Extend} {
+		for _, it := range []itemState{m.Keep, m.Stop, m.Reset} {
 			if it.Visible && !it.Enabled {
 				t.Errorf("%s: %q visible but disabled", c.name, it.Title)
 			}
 		}
-		for _, it := range []itemState{m.Keep, m.Stop, m.Mode, m.Extend} {
+		for _, it := range []itemState{m.Keep, m.Stop, m.Mode, m.Reset} {
 			if it.Checked && it.Title != "Presentation mode" {
 				t.Errorf("%s: %q checked", c.name, it.Title)
 			}
@@ -282,11 +286,35 @@ func TestMenuStateTable(t *testing.T) {
 	}
 }
 
+// The reset item is shown only when a click would change something: a
+// deadline exists, less than step is left, and no question is open.
+func TestMenuStateResetVisibility(t *testing.T) {
+	const timer = "Ends 12:30 · 30\u00a0min left"
+	cases := []struct {
+		name      string
+		timer     string
+		remaining time.Duration
+		pending   bool
+		want      bool
+	}{
+		{"remaining < step", timer, testTimeout - time.Second, false, true},
+		{"remaining == step", timer, testTimeout, false, false},
+		{"remaining > step", timer, testTimeout + time.Minute, false, false},
+		{"question pending", timer, time.Minute, true, false},
+		{"no deadline", "", 0, false, false},
+	}
+	for _, c := range cases {
+		if got := menuState(true, c.timer, c.remaining, c.pending, testTimeout).Reset.Visible; got != c.want {
+			t.Errorf("%s: reset visible %v want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestMenuStateCheckboxTitleNeverChanges(t *testing.T) {
 	for _, active := range []bool{false, true} {
-		for _, timer := range []string{"", "Ends 12:12 · 12 min left"} {
+		for _, timer := range []string{"", "Ends 12:12 · 12\u00a0min left"} {
 			for _, pending := range []bool{false, true} {
-				if got := menuState(active, timer, pending, testTimeout).Mode.Title; got != modeTitle {
+				if got := menuState(active, timer, time.Minute, pending, testTimeout).Mode.Title; got != modeTitle {
 					t.Errorf("active %v timer %q pending %v: title %q", active, timer, pending, got)
 				}
 			}
@@ -299,15 +327,17 @@ func TestMenuStateCheckboxTitleNeverChanges(t *testing.T) {
 
 func TestMenuStateTitlesFromStep(t *testing.T) {
 	for _, c := range []struct {
-		cfg              time.Duration
-		keep, extend, ks string
+		cfg                        time.Duration
+		keep, reset, keepTip, rTip string
 	}{
-		{0, "Keep presenting (+30 min)", "Extend by 30 min", "Keeps presentation mode on until 30 minutes from now."},
-		{45 * time.Minute, "Keep presenting (+45 min)", "Extend by 45 min", "Keeps presentation mode on until 45 minutes from now."},
+		{0, "Keep presenting for 30 min", "Reset timer to 30 min",
+			"Keeps presentation mode on until 30 minutes from now.", "Sets the end time to 30 minutes from now."},
+		{45 * time.Minute, "Keep presenting for 45 min", "Reset timer to 45 min",
+			"Keeps presentation mode on until 45 minutes from now.", "Sets the end time to 45 minutes from now."},
 	} {
-		m := menuState(true, "x", true, continueStep(c.cfg))
-		if m.Keep.Title != c.keep || m.Extend.Title != c.extend || m.Keep.Tooltip != c.ks {
-			t.Errorf("cfg %v: keep %q extend %q tip %q", c.cfg, m.Keep.Title, m.Extend.Title, m.Keep.Tooltip)
+		m := menuState(true, "x", time.Minute, true, continueStep(c.cfg))
+		if m.Keep.Title != c.keep || m.Reset.Title != c.reset || m.Keep.Tooltip != c.keepTip || m.Reset.Tooltip != c.rTip {
+			t.Errorf("cfg %v: keep %q/%q reset %q/%q", c.cfg, m.Keep.Title, m.Keep.Tooltip, m.Reset.Title, m.Reset.Tooltip)
 		}
 		if m.Stop.Title != "Stop presenting" {
 			t.Errorf("stop %q", m.Stop.Title)
@@ -316,8 +346,107 @@ func TestMenuStateTitlesFromStep(t *testing.T) {
 			if it.Tooltip == "" || !strings.HasSuffix(it.Tooltip, ".") && it.Title != modeTitle {
 				t.Errorf("%q tooltip %q", it.Title, it.Tooltip)
 			}
+			if strings.Contains(it.Title, "+") || strings.Contains(it.Title, "Extend") || strings.Contains(it.Title, " by ") {
+				t.Errorf("%q promises an addition", it.Title)
+			}
 		}
 	}
+}
+
+// fakeClock is a settable clock for the toggle cooldown tests.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *fakeClock) add(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+func TestToggleCooldownDropsFastSecondClick(t *testing.T) {
+	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	g := &clickGate{now: clk.now}
+	var tg toggler
+	runs := 0
+	var mu sync.Mutex
+	fn := func(context.Context) { mu.Lock(); runs++; mu.Unlock() }
+	if !tryToggle(context.Background(), g, &tg, fn) {
+		t.Fatal("first click refused")
+	}
+	tg.wait()
+	clk.add(100 * time.Millisecond)
+	if tryToggle(context.Background(), g, &tg, fn) {
+		t.Error("click at +100ms accepted")
+	}
+	req := make(chan struct{}, 1)
+	requestToggle(g, req)
+	if len(req) != 0 {
+		t.Error("click during cooldown was queued")
+	}
+	clk.add(500 * time.Millisecond) // +600ms
+	requestToggle(g, req)
+	if len(req) != 1 {
+		t.Error("click after cooldown not queued")
+	}
+	if !tryToggle(context.Background(), g, &tg, fn) {
+		t.Error("click at +600ms refused")
+	}
+	tg.wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if runs != 2 {
+		t.Errorf("toggle ran %d times, want 2", runs)
+	}
+	if toggleCooldown != 500*time.Millisecond {
+		t.Errorf("cooldown %v", toggleCooldown)
+	}
+}
+
+func TestToggleCooldownStartsEvenWhenToggleFails(t *testing.T) {
+	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	g := &clickGate{now: clk.now}
+	var tg toggler
+	var a actionState
+	failing := func(ctx context.Context) {
+		a.run(ctx, func(context.Context) error { return errors.New("mute: boom") }, func() {})
+	}
+	if !tryToggle(context.Background(), g, &tg, failing) {
+		t.Fatal("first click refused")
+	}
+	tg.wait()
+	if a.text() != "mute: boom" {
+		t.Fatalf("toggle did not run: %q", a.text())
+	}
+	clk.add(100 * time.Millisecond)
+	if tryToggle(context.Background(), g, &tg, failing) {
+		t.Error("click after a failed toggle accepted within the cooldown")
+	}
+}
+
+func TestToggleWhileRunningDroppedAndDoesNotRestartCooldown(t *testing.T) {
+	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	g := &clickGate{now: clk.now}
+	var tg toggler
+	release := make(chan struct{})
+	if !tryToggle(context.Background(), g, &tg, func(context.Context) { <-release }) {
+		t.Fatal("first click refused")
+	}
+	clk.add(600 * time.Millisecond) // cooldown over, toggle still running
+	if tryToggle(context.Background(), g, &tg, func(context.Context) { t.Error("overlapping toggle ran") }) {
+		t.Error("click while running accepted")
+	}
+	close(release)
+	tg.wait()
+	clk.add(10 * time.Millisecond)
+	ran := make(chan struct{})
+	if !tryToggle(context.Background(), g, &tg, func(context.Context) { close(ran) }) {
+		t.Error("dropped click restarted the cooldown")
+	}
+	<-ran
+	tg.wait()
 }
 
 func TestStepMinutes(t *testing.T) {

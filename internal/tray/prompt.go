@@ -38,10 +38,11 @@ func timerLabel(now, expires time.Time) string {
 	return "Ends " + expires.Format("15:04") + " · " + rem
 }
 
-// keepTitle answers the question by extending the session by step; the
-// notification action and the menu item share it.
+// keepTitle answers the question by setting the end time to step from now
+// (a later end time is kept); the notification action and the menu item
+// share it.
 func keepTitle(step time.Duration) string {
-	return fmt.Sprintf("Keep presenting (+%d min)", stepMinutes(step))
+	return fmt.Sprintf("Keep presenting for %d min", stepMinutes(step))
 }
 
 // stepMinutes is step in whole minutes, rounded to the nearest minute.
@@ -49,8 +50,8 @@ func stepMinutes(step time.Duration) int {
 	return int((step + time.Minute/2) / time.Minute)
 }
 
-// promptRequest builds the "keep presenting?" question for st; step is how
-// far keeping moves the deadline.
+// promptRequest builds the "keep presenting?" question for st; keeping sets
+// the end time to step from now.
 func promptRequest(info about.Info, st core.State, now time.Time, step time.Duration) system.Prompt {
 	return system.Prompt{
 		Summary:  "Keep presenting?",
@@ -63,7 +64,8 @@ func promptRequest(info about.Info, st core.State, now time.Time, step time.Dura
 	}
 }
 
-// continueStep is how far "continue" moves the deadline: the configured
+// continueStep is the time from now that "Keep presenting" and "Reset
+// timer" set the end time to (a later end time is kept): the configured
 // timeout, or the default 30 minutes when none is configured (a deadline can
 // still exist through "on --for").
 func continueStep(cfgTimeout time.Duration) time.Duration {
@@ -78,7 +80,8 @@ type promptDeps struct {
 	// prompter shows the notification; nil leaves only the menu items.
 	prompter system.Prompter
 	info     about.Info
-	// step is how far "keep presenting" moves the deadline (label only).
+	// step is the time from now that "keep presenting" sets the end
+	// time to (label only).
 	step   time.Duration
 	status func() (core.State, error)
 	// extend moves the deadline of a live session (never shortens or clears
@@ -91,7 +94,7 @@ type promptDeps struct {
 	changed func()
 }
 
-// promptCoordinator asks at most one "continue presenting?" question at a
+// promptCoordinator asks at most one "keep presenting?" question at a
 // time. The notification answer and the two fallback menu items race; the
 // first answer wins and cancels the other.
 type promptCoordinator struct {

@@ -137,8 +137,8 @@ func TestDBusPrompterCancelledContextSkipsConnect(t *testing.T) {
 }
 
 func TestPromptActionsAndHints(t *testing.T) {
-	p := Prompt{Actions: []PromptAction{{"continue", "Continue presenting"}, {"end", "End presentation"}}}
-	if got, want := promptActions(p), []string{"continue", "Continue presenting", "end", "End presentation"}; !reflect.DeepEqual(got, want) {
+	p := Prompt{Actions: []PromptAction{{"continue", "Keep presenting for 30 min"}, {"end", "Stop presenting"}}}
+	if got, want := promptActions(p), []string{"continue", "Keep presenting for 30 min", "end", "Stop presenting"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("actions %v", got)
 	}
 	h := promptHints()

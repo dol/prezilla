@@ -96,18 +96,22 @@ type itemState struct {
 // menuModel is the state of the menu items that change at runtime, named
 // after their role. About and Quit never change.
 type menuModel struct {
-	Keep, Stop, Mode, Timer, Extend itemState
+	Keep, Stop, Mode, Timer, Reset itemState
 }
 
 // ordered returns the items in menu order.
 func (m menuModel) ordered() []itemState {
-	return []itemState{m.Keep, m.Stop, m.Mode, m.Timer, m.Extend}
+	return []itemState{m.Keep, m.Stop, m.Mode, m.Timer, m.Reset}
 }
 
 // menuState decides the changing menu items. timer is timerLabel's text and
-// is empty without a live deadline; pending means a screensaver question is
-// open; step is how far Keep presenting and Extend move the deadline.
-func menuState(active bool, timer string, pending bool, step time.Duration) menuModel {
+// is empty without a live deadline; remaining is the time left until that
+// deadline; pending means a screensaver question is open. Keep presenting
+// and Reset timer both set the end time to step from now (Engine.Extend
+// never adds and never shortens), so Reset is shown only when that would
+// change something (less than step left) and not while the question is
+// open, where Keep presenting answers it.
+func menuState(active bool, timer string, remaining time.Duration, pending bool, step time.Duration) menuModel {
 	hasDeadline := timer != ""
 	mins := stepMinutes(step)
 	return menuModel{
@@ -125,15 +129,53 @@ func menuState(active bool, timer string, pending bool, step time.Duration) menu
 			Title: timer, Tooltip: "Presentation mode turns off by itself at this time.",
 			Visible: hasDeadline,
 		},
-		Extend: itemState{
-			Title:   fmt.Sprintf("Extend by %d min", mins),
-			Tooltip: fmt.Sprintf("Keeps presentation mode on until %d minutes from now.", mins),
-			Visible: hasDeadline, Enabled: true,
+		Reset: itemState{
+			Title:   fmt.Sprintf("Reset timer to %d min", mins),
+			Tooltip: fmt.Sprintf("Sets the end time to %d minutes from now.", mins),
+			Visible: hasDeadline && remaining < step && !pending, Enabled: true,
 		},
 	}
 }
 
-// startExtend runs one Extend call on xt, detached from ctx's cancellation
+// toggleCooldown is how long after an accepted toggle further toggle clicks
+// (icon or checkbox) are ignored, so a double click cannot flip the mode
+// on and straight back off.
+const toggleCooldown = 500 * time.Millisecond
+
+// clickGate drops toggle clicks within toggleCooldown of the last accepted
+// toggle.
+type clickGate struct {
+	now func() time.Time
+
+	mu   sync.Mutex
+	last time.Time // start of the last accepted toggle; zero before the first
+}
+
+// open reports whether the cooldown has passed.
+func (g *clickGate) open() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.last.IsZero() || g.now().Sub(g.last) >= toggleCooldown
+}
+
+// tryToggle starts fn on tg unless the cooldown is running or a toggle is
+// already running; an accepted toggle starts the cooldown whatever its
+// result. It reports whether fn was started.
+func tryToggle(ctx context.Context, g *clickGate, tg *toggler, fn func(context.Context)) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.now()
+	if !g.last.IsZero() && now.Sub(g.last) < toggleCooldown {
+		return false
+	}
+	if !tg.start(ctx, fn) {
+		return false
+	}
+	g.last = now
+	return true
+}
+
+// startExtend runs one Engine.Extend call for the Reset timer item on xt, detached from ctx's cancellation
 // and bounded by core.OperationTimeout, unless one is already running. A
 // (false, nil) result (the session ended meanwhile) changes nothing; an
 // error is recorded in a for the tooltip and printed to stderr. done runs
@@ -286,7 +328,8 @@ func Run(ctx context.Context, cfg Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var tg, xt toggler // toggle and Extend: at most one of each at a time
+	var tg, xt toggler // toggle and Reset timer: at most one of each at a time
+	gate := &clickGate{now: time.Now}
 	// redraw asks the menu loop to refresh; coalesced, never blocks.
 	redraw := make(chan struct{}, 1)
 	// toggleReq carries left clicks on the icon and checkbox clicks to the
@@ -319,8 +362,8 @@ func Run(ctx context.Context, cfg Config) error {
 	// Set before systray.Run: the library reads it when it exports the item
 	// (ItemIsMenu), and the host then sends left clicks as Activate. A host
 	// that never calls Activate still opens the menu.
-	systray.SetOnTapped(func() { requestToggle(toggleReq) })
-	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, coord, redraw, toggleReq) }, cancel)
+	systray.SetOnTapped(func() { requestToggle(gate, toggleReq) })
+	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, gate, coord, redraw, toggleReq) }, cancel)
 	cancel()
 	<-watchDone
 	coord.wait()
@@ -329,16 +372,20 @@ func Run(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-// requestToggle queues one toggle request without blocking; a request that
-// arrives while one is queued is merged into it.
-func requestToggle(req chan<- struct{}) {
+// requestToggle queues one toggle request without blocking. A click during
+// the cooldown is dropped, not queued; a request that arrives while one is
+// queued is merged into it.
+func requestToggle(g *clickGate, req chan<- struct{}) {
+	if !g.open() {
+		return
+	}
 	select {
 	case req <- struct{}{}:
 	default:
 	}
 }
 
-func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt *toggler,
+func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt *toggler, gate *clickGate,
 	coord *promptCoordinator, redraw <-chan struct{}, toggleReq chan struct{}) {
 	e, timeout, spawn := cfg.Engine, cfg.Timeout, cfg.Spawn
 	step := continueStep(timeout)
@@ -347,7 +394,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 
 	// Items cannot be reordered after creation: create them in menu order,
 	// hide the conditional ones, and let refresh show them.
-	m := menuState(false, "", false, step)
+	m := menuState(false, "", 0, false, step)
 	keepItem := systray.AddMenuItem(m.Keep.Title, m.Keep.Tooltip)
 	keepItem.Hide()
 	stopItem := systray.AddMenuItem(m.Stop.Title, m.Stop.Tooltip)
@@ -356,8 +403,8 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	timerItem := systray.AddMenuItem("", m.Timer.Tooltip)
 	timerItem.Disable()
 	timerItem.Hide()
-	extendItem := systray.AddMenuItem(m.Extend.Title, m.Extend.Tooltip)
-	extendItem.Hide()
+	resetItem := systray.AddMenuItem(m.Reset.Title, m.Reset.Tooltip)
+	resetItem.Hide()
 	systray.AddSeparator()
 	aboutItem := systray.AddMenuItem("About prezilla", "Shows the version, license and website.")
 	systray.AddSeparator()
@@ -367,7 +414,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	var lastErr error
 	var actions, extendErr actionState
 	var lastExpiryErr string
-	var timerShown, promptShown bool
+	var timerShown, resetShown, promptShown bool
 
 	refresh := func() {
 		opCtx, opCancel := context.WithTimeout(ctx, core.OperationTimeout)
@@ -405,14 +452,21 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		}
 		errText := joinErrText(joinErrText(toggleText, actions.text()), joinErrText(extendErr.text(), coord.errText()))
 		tip := tooltip(st.Active, remaining, errText, expText, prompting)
-		m := menuState(st.Active, timer, prompting, step)
+		var left time.Duration
+		if timer != "" {
+			left = st.ExpiresAt.Sub(now)
+		}
+		m := menuState(st.Active, timer, left, prompting, step)
 		if m.Timer.Visible {
 			timerItem.SetTitle(m.Timer.Title)
 		}
 		if m.Timer.Visible != timerShown {
 			timerShown = m.Timer.Visible
 			setVisible(timerItem, timerShown)
-			setVisible(extendItem, m.Extend.Visible)
+		}
+		if m.Reset.Visible != resetShown {
+			resetShown = m.Reset.Visible
+			setVisible(resetItem, resetShown)
 		}
 		if m.Keep.Visible != promptShown {
 			promptShown = m.Keep.Visible
@@ -433,8 +487,10 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	refresh()
 
 	// toggle is the one handler for the checkbox and the icon's left click.
+	// The cooldown applies here and in requestToggle, never to Reset timer
+	// or the question items.
 	toggle := func() {
-		tg.start(ctx, func(tctx context.Context) {
+		tryToggle(ctx, gate, tg, func(tctx context.Context) {
 			_, err := e.Toggle(tctx, timeout)
 			if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
 				err = errors.Join(err, serr)
@@ -466,10 +522,10 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 			case <-stopItem.ClickedCh:
 				coord.menuAnswer(ctx, keyEnd)
 			case <-modeItem.ClickedCh:
-				requestToggle(toggleReq)
+				requestToggle(gate, toggleReq)
 			case <-toggleReq:
 				toggle()
-			case <-extendItem.ClickedCh:
+			case <-resetItem.ClickedCh:
 				startExtend(ctx, xt, &extendErr, e.Extend, step, refresh)
 			case <-aboutItem.ClickedCh:
 				go runAction(ctx, &actions, aboutAction(cfg.Notifier, cfg.About), refresh)

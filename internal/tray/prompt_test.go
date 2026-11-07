@@ -73,14 +73,14 @@ func TestPromptRequestStrings(t *testing.T) {
 		Body:     "The screensaver started with 12\u00a0min left.",
 		IconName: "prezilla",
 		Actions: []system.PromptAction{
-			{Key: "continue", Label: "Keep presenting (+30 min)"},
+			{Key: "continue", Label: "Keep presenting for 30 min"},
 			{Key: "end", Label: "Stop presenting"},
 		},
 	}
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("got %+v\nwant %+v", p, want)
 	}
-	if got := promptRequest(about.New("1"), st, now, 45*time.Minute).Actions[0].Label; got != "Keep presenting (+45 min)" {
+	if got := promptRequest(about.New("1"), st, now, 45*time.Minute).Actions[0].Label; got != "Keep presenting for 45 min" {
 		t.Errorf("45 min step: %q", got)
 	}
 	if promptLine != "Screensaver started. Keep presenting?" {
@@ -92,7 +92,7 @@ func TestPromptRequestStrings(t *testing.T) {
 func TestPromptActionsMatchMenuItems(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	p := promptRequest(about.New("1"), core.State{Active: true, ExpiresAt: now.Add(time.Hour)}, now, testTimeout)
-	m := menuState(true, "x", true, testTimeout)
+	m := menuState(true, "x", time.Minute, true, testTimeout)
 	if p.Actions[0].Label != m.Keep.Title || p.Actions[1].Label != m.Stop.Title {
 		t.Errorf("actions %q/%q, menu %q/%q", p.Actions[0].Label, p.Actions[1].Label, m.Keep.Title, m.Stop.Title)
 	}

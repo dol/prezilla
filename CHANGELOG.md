@@ -10,9 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `prezilla about` prints version, license and website.
 - Tray menu entry "About prezilla" (desktop notification).
 - System tray front-end (`prezilla tray`) with an autostart entry.
-- Tray timer entry showing when presentation mode ends and the minutes left, with an "Extend by N min" entry below it.
-- Left-click on the tray icon toggles presentation mode; the menu shows a "Presentation mode" checkbox instead of a state label.
-- Tray "Keep presenting?" prompt when the screensaver starts during a timed session: a sticky critical notification with "Keep presenting (+N min)" and "Stop presenting" actions, plus the same entries at the top of the tray menu in case do-not-disturb hides the notification.
+- Tray timer entry showing when presentation mode ends and the minutes left, with a "Reset timer to N min" entry below it while less than N minutes are left (the end time becomes N minutes from now; a later one is kept).
+- Left-click on the tray icon toggles presentation mode; the menu shows a "Presentation mode" checkbox instead of a state label. Toggle clicks within 500 ms of an accepted toggle are ignored, so a double click does not flip the mode twice.
+- Tray "Keep presenting?" prompt when the screensaver starts during a timed session: a sticky critical notification with "Keep presenting for N min" and "Stop presenting" actions, plus the same entries at the top of the tray menu in case do-not-disturb hides the notification.
 - Five XFCE switches, each saving the original value and restoring it on `off`:
   desktop icons, notifications, audio mute, minimize windows and wallpaper.
 - Auto-disable timeout (`timeout_minutes`) that turns presentation mode off again.
