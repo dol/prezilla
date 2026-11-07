@@ -26,6 +26,8 @@ const pipeWaitDelay = 2 * time.Second
 type ExecRunner struct {
 	// Timeout bounds each command; zero means DefaultTimeout.
 	Timeout time.Duration
+	// Dir is the commands' working directory; empty means the current one.
+	Dir string
 }
 
 func (r ExecRunner) timeout() time.Duration {
@@ -46,6 +48,7 @@ func (r ExecRunner) Run(parent context.Context, name string, args ...string) (st
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.Dir = r.Dir
 	cmd.WaitDelay = pipeWaitDelay
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) && parent.Err() == nil {

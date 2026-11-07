@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -544,4 +545,166 @@ func TestStartExtendIgnoresOverlappingClicks(t *testing.T) {
 		t.Error("click after completion refused")
 	}
 	xt.wait()
+}
+
+// fakeWindow is a scripted system.AboutWindow; block, when set, is waited on
+// (or ctx) before Show returns.
+type fakeWindow struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+	block chan struct{}
+}
+
+func (w *fakeWindow) Show(ctx context.Context, _ about.Info) error {
+	w.mu.Lock()
+	w.calls++
+	block, err := w.block, w.err
+	w.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return err
+}
+
+func (w *fakeWindow) n() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.calls
+}
+
+func newShower(w system.AboutWindow, n system.Notifier) (*aboutShower, *bytes.Buffer) {
+	var log bytes.Buffer
+	return &aboutShower{window: w, notifier: n, info: about.New("1.2.3"), stderr: &log}, &log
+}
+
+func TestAboutShowerWindowSuccessSendsNoNotification(t *testing.T) {
+	w, n := &fakeWindow{}, &system.FakeNotifier{}
+	s, log := newShower(w, n)
+	if err := s.show(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if w.n() != 1 || len(n.Calls) != 0 || log.Len() != 0 {
+		t.Errorf("window %d notify %v log %q", w.n(), n.Calls, log.String())
+	}
+}
+
+func TestAboutShowerNoZenityFallsBackAndWarnsOnce(t *testing.T) {
+	w := &fakeWindow{err: fmt.Errorf("%w: exec: not found", system.ErrNoZenity)}
+	n := &system.FakeNotifier{}
+	s, log := newShower(w, n)
+	for i := 1; i <= 2; i++ {
+		if err := s.show(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(n.Calls) != i || n.Calls[i-1].Summary != "prezilla 1.2.3" ||
+			!strings.Contains(n.Calls[i-1].Body, about.Website) {
+			t.Fatalf("click %d: notify %v", i, n.Calls)
+		}
+	}
+	if log.String() != "about: zenity not found; showing a notification instead\n" {
+		t.Errorf("log %q", log.String())
+	}
+}
+
+func TestAboutShowerRealFailureFallsBack(t *testing.T) {
+	w := &fakeWindow{err: errors.New("about: zenity: exit status 2")}
+	n := &system.FakeNotifier{}
+	s, log := newShower(w, n)
+	if err := s.show(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Calls) != 1 || !strings.Contains(log.String(), "exit status 2") {
+		t.Errorf("notify %v log %q", n.Calls, log.String())
+	}
+}
+
+func TestAboutShowerNilWindowUsesNotification(t *testing.T) {
+	n := &system.FakeNotifier{}
+	s, log := newShower(nil, n)
+	if err := s.show(context.Background()); err != nil || len(n.Calls) != 1 || log.Len() != 0 {
+		t.Errorf("err %v notify %v log %q", err, n.Calls, log.String())
+	}
+}
+
+func TestAboutShowerBothFailShowsError(t *testing.T) {
+	w := &fakeWindow{err: fmt.Errorf("%w: exec: not found", system.ErrNoZenity)}
+	n := &system.FakeNotifier{Err: errors.New("no bus")}
+	s, _ := newShower(w, n)
+	var a actionState
+	a.run(context.Background(), s.show, func() {})
+	if !strings.Contains(a.text(), "no bus") {
+		t.Errorf("text %q", a.text())
+	}
+	s, _ = newShower(nil, nil)
+	if err := s.show(context.Background()); err == nil || !strings.Contains(err.Error(), "no notifier configured") {
+		t.Errorf("nil everything: %v", err)
+	}
+}
+
+func TestAboutShowerOpenerFailureShownWithoutNotification(t *testing.T) {
+	w := &fakeWindow{err: &system.WebsiteError{Err: errors.New("open: xdg-open failed")}}
+	n := &system.FakeNotifier{}
+	s, _ := newShower(w, n)
+	var a actionState
+	a.run(context.Background(), s.show, func() {})
+	if !strings.Contains(a.text(), "xdg-open failed") || len(n.Calls) != 0 {
+		t.Errorf("text %q notify %v", a.text(), n.Calls)
+	}
+	if tip := tooltip(false, "", a.text(), "", false); !strings.Contains(tip, "(error: ") {
+		t.Errorf("tooltip %q", tip)
+	}
+}
+
+func TestAboutShowerCancelledIsSilent(t *testing.T) {
+	w := &fakeWindow{block: make(chan struct{})}
+	n := &system.FakeNotifier{}
+	s, log := newShower(w, n)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.show(ctx); err != nil || len(n.Calls) != 0 || log.Len() != 0 {
+		t.Errorf("err %v notify %v log %q", err, n.Calls, log.String())
+	}
+}
+
+func TestAboutShowerSecondClickWhileOpenIgnored(t *testing.T) {
+	w := &fakeWindow{block: make(chan struct{})}
+	n := &system.FakeNotifier{}
+	s, _ := newShower(w, n)
+	var a actionState
+	done := make(chan struct{}, 2)
+	if !s.start(context.Background(), &a, func() { done <- struct{}{} }) {
+		t.Fatal("first click not started")
+	}
+	if s.start(context.Background(), &a, func() { done <- struct{}{} }) {
+		t.Error("second click started while the window is open")
+	}
+	close(w.block)
+	<-done
+	s.wait()
+	if w.n() != 1 || len(n.Calls) != 0 {
+		t.Errorf("window %d notify %v", w.n(), n.Calls)
+	}
+	if !s.start(context.Background(), &a, func() { done <- struct{}{} }) {
+		t.Error("click after close not started")
+	}
+	<-done
+	s.wait()
+}
+
+func TestAboutShowerQuitClosesOpenWindow(t *testing.T) {
+	w := &fakeWindow{block: make(chan struct{})}
+	s, _ := newShower(w, &system.FakeNotifier{})
+	ctx, cancel := context.WithCancel(context.Background())
+	var a actionState
+	s.start(ctx, &a, func() {})
+	cancel()
+	s.wait() // returns only because the cancelled ctx closed the window
+	if a.text() != "" {
+		t.Errorf("text %q", a.text())
+	}
 }

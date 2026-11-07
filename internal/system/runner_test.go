@@ -115,3 +115,10 @@ func TestExecRunnerLingeringGrandchildYieldsErrWaitDelay(t *testing.T) {
 		t.Errorf("took %v", d)
 	}
 }
+
+func TestExecRunnerDir(t *testing.T) {
+	out, err := ExecRunner{Dir: "/"}.Run(context.Background(), "pwd")
+	if err != nil || out != "/" {
+		t.Fatalf("got %q, %v; want /", out, err)
+	}
+}

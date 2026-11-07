@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -244,7 +245,7 @@ func spawnIfDeadline(status func() (core.State, error), spawn func() error) erro
 	return nil
 }
 
-// actionTimeout bounds one About action.
+// actionTimeout bounds one About notification.
 const actionTimeout = 10 * time.Second
 
 // Config holds what the tray needs.
@@ -255,9 +256,9 @@ type Config struct {
 	Spawn    func() error
 	About    about.Info
 	Notifier system.Notifier
-	// Opener opens URLs; the tray menu does not use it (the About window
-	// will). nil is harmless.
-	Opener system.Opener
+	// AboutWindow shows About prezilla (with its Open website button); nil
+	// or a failure falls back to the About notification.
+	AboutWindow system.AboutWindow
 	// ScreenSaver reports screensaver activation; nil disables the
 	// "continue presenting?" prompt entirely.
 	ScreenSaver system.ScreenSaver
@@ -279,6 +280,73 @@ func aboutAction(n system.Notifier, info about.Info) func(context.Context) error
 		summary, body := aboutMessage(info)
 		return n.Notify(ctx, summary, body, info.IconName)
 	}
+}
+
+// aboutShower runs About prezilla: the window when there is one, otherwise
+// (or when it fails) the notification. At most one runs at a time.
+type aboutShower struct {
+	window   system.AboutWindow
+	notifier system.Notifier
+	info     about.Info
+	stderr   io.Writer // nil means os.Stderr
+
+	busy     sync.Mutex
+	warnOnce sync.Once
+}
+
+func (s *aboutShower) logf(format string, args ...any) {
+	w := s.stderr
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, format+"\n", args...)
+}
+
+// show opens the window and waits for it. A cancelled ctx (Quit) returns
+// nil without a notification; an opener failure after "Open website" is
+// returned as is; a missing zenity or another window failure falls back to
+// the notification, whose error is returned if it fails too.
+func (s *aboutShower) show(ctx context.Context) error {
+	if s.window != nil {
+		err := s.window.Show(ctx, s.info)
+		var we *system.WebsiteError
+		switch {
+		case err == nil:
+			return nil
+		case ctx.Err() != nil:
+			return nil
+		case errors.As(err, &we):
+			return err
+		case errors.Is(err, system.ErrNoZenity):
+			s.warnOnce.Do(func() { s.logf("about: zenity not found; showing a notification instead") })
+		default:
+			s.logf("%v; showing a notification instead", err)
+		}
+	}
+	nctx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
+	return aboutAction(s.notifier, s.info)(nctx)
+}
+
+// start runs show in a goroutine, recording its result in a and calling
+// done, unless an About window is already open. Unlike toggler it keeps
+// ctx's cancellation, so Quit closes the window. It reports whether it
+// started.
+func (s *aboutShower) start(ctx context.Context, a *actionState, done func()) bool {
+	if !s.busy.TryLock() {
+		return false
+	}
+	go func() {
+		defer s.busy.Unlock()
+		a.run(ctx, s.show, done)
+	}()
+	return true
+}
+
+// wait blocks until any open About window has closed.
+func (s *aboutShower) wait() {
+	s.busy.Lock()
+	s.busy.Unlock() //nolint:staticcheck // empty critical section is the point
 }
 
 // joinErrText joins two non-empty error texts with "; ".
@@ -329,6 +397,7 @@ func Run(ctx context.Context, cfg Config) error {
 	defer cancel()
 
 	var tg, xt toggler // toggle and Reset timer: at most one of each at a time
+	shower := &aboutShower{window: cfg.AboutWindow, notifier: cfg.Notifier, info: cfg.About}
 	gate := &clickGate{now: time.Now}
 	// redraw asks the menu loop to refresh; coalesced, never blocks.
 	redraw := make(chan struct{}, 1)
@@ -363,9 +432,10 @@ func Run(ctx context.Context, cfg Config) error {
 	// (ItemIsMenu), and the host then sends left clicks as Activate. A host
 	// that never calls Activate still opens the menu.
 	systray.SetOnTapped(func() { requestToggle(gate, toggleReq) })
-	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, gate, coord, redraw, toggleReq) }, cancel)
+	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, gate, shower, coord, redraw, toggleReq) }, cancel)
 	cancel()
 	<-watchDone
+	shower.wait()
 	coord.wait()
 	tg.wait()
 	xt.wait()
@@ -386,7 +456,7 @@ func requestToggle(g *clickGate, req chan<- struct{}) {
 }
 
 func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt *toggler, gate *clickGate,
-	coord *promptCoordinator, redraw <-chan struct{}, toggleReq chan struct{}) {
+	shower *aboutShower, coord *promptCoordinator, redraw <-chan struct{}, toggleReq chan struct{}) {
 	e, timeout, spawn := cfg.Engine, cfg.Timeout, cfg.Spawn
 	step := continueStep(timeout)
 	systray.SetIcon(Icon(false))
@@ -528,7 +598,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 			case <-resetItem.ClickedCh:
 				startExtend(ctx, xt, &extendErr, e.Extend, step, refresh)
 			case <-aboutItem.ClickedCh:
-				go runAction(ctx, &actions, aboutAction(cfg.Notifier, cfg.About), refresh)
+				shower.start(ctx, &actions, refresh) // ignored while the window is open
 			case <-quit.ClickedCh:
 				cancel()
 			}
@@ -542,11 +612,4 @@ func setVisible(item *systray.MenuItem, show bool) {
 	} else {
 		item.Hide()
 	}
-}
-
-// runAction runs fn bounded by actionTimeout and stopped by Quit.
-func runAction(ctx context.Context, a *actionState, fn func(context.Context) error, done func()) {
-	actx, cancel := context.WithTimeout(ctx, actionTimeout)
-	defer cancel()
-	a.run(actx, fn, done)
 }

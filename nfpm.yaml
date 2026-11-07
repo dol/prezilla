@@ -9,6 +9,15 @@ description: Toggle presentation mode (icons, notifications, mute, minimize, wal
 homepage: https://github.com/dol/prezilla
 license: Apache-2.0
 
+# zenity draws the tray's About window; without it About shows a notification.
+# nfpm has no recommends for archlinux (optdepends are not supported), so the
+# Arch package lists nothing.
+overrides:
+  deb:
+    recommends: [zenity]
+  rpm:
+    recommends: [zenity]
+
 contents:
   - src: dist/prezilla-linux-amd64
     dst: /usr/bin/prezilla
