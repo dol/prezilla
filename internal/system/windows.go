@@ -3,6 +3,9 @@ package system
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -12,10 +15,18 @@ type Windows interface {
 	ShowingDesktop(ctx context.Context) (bool, error)
 	// SetShowingDesktop shows (true) or hides (false) the desktop.
 	SetShowingDesktop(ctx context.Context, show bool) error
+	// VisibleWindows returns the regular top-level windows that are not
+	// hidden (minimized), bottom to top.
+	VisibleWindows(ctx context.Context) ([]uint32, error)
+	// RestoreWindows shows the listed windows (bottom to top) that still
+	// exist and are hidden, then re-activates the window that was active
+	// when it started.
+	RestoreWindows(ctx context.Context, ids []uint32) error
 }
 
 // FakeWindows is an in-memory Windows for tests. Calls records every call as
-// "ShowingDesktop" or "SetShowingDesktop <bool>".
+// "ShowingDesktop", "SetShowingDesktop <bool>", "VisibleWindows" or
+// "RestoreWindows <id>,<id>...".
 type FakeWindows struct {
 	mu sync.Mutex
 
@@ -25,6 +36,14 @@ type FakeWindows struct {
 	GetErr     error // returned by ShowingDesktop when set
 	SetErr     error // returned by SetShowingDesktop when set
 	SetErrOnce error // returned by the first SetShowingDesktop only, then cleared
+
+	Visible    []uint32 // returned by VisibleWindows
+	VisibleErr error    // returned by VisibleWindows when set
+	RestoreErr error    // returned by RestoreWindows when set
+	Restored   []uint32 // ids of the last RestoreWindows call
+
+	// OnRestore, if set, is called with each RestoreWindows's context and ids.
+	OnRestore func(ctx context.Context, ids []uint32)
 
 	// OnSet, if set, is called with each SetShowingDesktop's context and
 	// value before the result is decided.
@@ -62,4 +81,29 @@ func (f *FakeWindows) SetShowingDesktop(ctx context.Context, show bool) error {
 	}
 	f.Showing = show
 	return nil
+}
+
+// VisibleWindows implements Windows.
+func (f *FakeWindows) VisibleWindows(context.Context) ([]uint32, error) {
+	f.record("VisibleWindows")
+	if f.VisibleErr != nil {
+		return nil, f.VisibleErr
+	}
+	return slices.Clone(f.Visible), nil
+}
+
+// RestoreWindows implements Windows.
+func (f *FakeWindows) RestoreWindows(ctx context.Context, ids []uint32) error {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatUint(uint64(id), 10)
+	}
+	f.record("RestoreWindows " + strings.Join(parts, ","))
+	if f.OnRestore != nil {
+		f.OnRestore(ctx, ids)
+	}
+	f.mu.Lock()
+	f.Restored = slices.Clone(ids)
+	f.mu.Unlock()
+	return f.RestoreErr
 }

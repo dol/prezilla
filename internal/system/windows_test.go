@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -176,5 +177,83 @@ func TestSendShowingDesktopErrors(t *testing.T) {
 		func(xproto.Atom, int) error { return errors.New("send boom") })
 	if err == nil || !strings.HasPrefix(err.Error(), "x11: set showing desktop:") || !strings.Contains(err.Error(), "send boom") {
 		t.Errorf("send err = %v", err)
+	}
+}
+
+func TestRegularVisible(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		types, states []string
+		want          bool
+	}{
+		{"untyped", nil, nil, true},
+		{"normal", []string{"_NET_WM_WINDOW_TYPE_NORMAL"}, []string{"_NET_WM_STATE_FOCUSED"}, true},
+		{"dialog", []string{"_NET_WM_WINDOW_TYPE_DIALOG"}, nil, true},
+		{"dialog then utility", []string{"_NET_WM_WINDOW_TYPE_UTILITY", "_NET_WM_WINDOW_TYPE_NORMAL"}, nil, true},
+		{"hidden", nil, []string{"_NET_WM_STATE_HIDDEN"}, false},
+		{"skip taskbar", []string{"_NET_WM_WINDOW_TYPE_NORMAL"}, []string{"_NET_WM_STATE_SKIP_TASKBAR"}, false},
+		{"dock", []string{"_NET_WM_WINDOW_TYPE_DOCK"}, nil, false},
+		{"desktop", []string{"_NET_WM_WINDOW_TYPE_DESKTOP"}, nil, false},
+		{"splash", []string{"_NET_WM_WINDOW_TYPE_SPLASH"}, nil, false},
+	} {
+		if got := regularVisible(c.types, c.states); got != c.want {
+			t.Errorf("%s: got %v", c.name, got)
+		}
+	}
+}
+
+func TestRestoreOrder(t *testing.T) {
+	hidden := func(id uint32) bool { return id != 3 }
+	got := restoreOrder([]uint32{5, 1, 3, 9, 1, 2}, []uint32{1, 2, 3, 5}, hidden)
+	if want := []uint32{5, 1, 2}; !slices.Equal(got, want) {
+		t.Fatalf("got %v", got)
+	}
+	if got := restoreOrder(nil, []uint32{1}, hidden); len(got) != 0 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestIsHidden(t *testing.T) {
+	if !isHidden([]string{"_NET_WM_STATE_ABOVE", "_NET_WM_STATE_HIDDEN"}) || isHidden(nil) {
+		t.Fatal("isHidden")
+	}
+}
+
+func TestX11WindowsListAndRestoreHonourContext(t *testing.T) {
+	n := listenX(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := X11Windows{}
+	if _, err := w.VisibleWindows(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("VisibleWindows: got %v", err)
+	}
+	if err := w.RestoreWindows(ctx, []uint32{1}); !errors.Is(err, context.Canceled) {
+		t.Errorf("RestoreWindows: got %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := n.Load(); got != 0 {
+		t.Fatalf("%d connections made with a cancelled context", got)
+	}
+}
+
+func TestX11WindowsListOwnTimeout(t *testing.T) {
+	listenX(t)
+	_, err := X11Windows{Timeout: 100 * time.Millisecond}.VisibleWindows(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestFakeWindowsVisibleAndRestore(t *testing.T) {
+	f := &FakeWindows{Visible: []uint32{4, 5}}
+	got, err := f.VisibleWindows(context.Background())
+	if err != nil || !slices.Equal(got, []uint32{4, 5}) {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if err := f.RestoreWindows(context.Background(), []uint32{4, 5}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"VisibleWindows", "RestoreWindows 4,5"}; !slices.Equal(f.Calls, want) {
+		t.Fatalf("calls %v", f.Calls)
 	}
 }
