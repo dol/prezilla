@@ -493,7 +493,7 @@ func TestRunOnWatcherFailurePrintsSentenceAndDetailsExit1(t *testing.T) {
 	if c := h.run("on"); c != 1 {
 		t.Errorf("code %d", c)
 	}
-	want := `Couldn't start the background timer, so presentation mode won't end by itself. Run "prezilla off" when you are done.` +
+	want := `Couldn't start the background timer, so presentation mode might not end by itself. Run "prezilla off" when you are done.` +
 		" (details: start watcher: fork/exec /x: resource temporarily unavailable)\n"
 	if got := h.errOut.String(); got != want {
 		t.Errorf("stderr %q\nwant %q", got, want)

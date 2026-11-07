@@ -105,7 +105,7 @@ var rules = []rule{
 	}},
 	{"timer watcher not started", func(_ error, text string) (string, bool) {
 		if strings.HasPrefix(text, "start watcher: ") {
-			return `Couldn't start the background timer, so presentation mode won't end by itself. Run "prezilla off" when you are done.`, true
+			return `Couldn't start the background timer, so presentation mode might not end by itself. Run "prezilla off" when you are done.`, true
 		}
 		return "", false
 	}},
