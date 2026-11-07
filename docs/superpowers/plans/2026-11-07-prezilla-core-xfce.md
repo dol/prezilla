@@ -16,7 +16,7 @@
 - Switch IDs (exact): `icons`, `notifications`, `mute`, `minimize`, `wallpaper`.
 - Toggling twice must leave the system exactly as it was (restore original values, never forced defaults).
 - CLI subcommands (exact): `on`, `off`, `toggle`, `status`, `tray`, `version`, `about` (added in Task 14).
-- About info (exact, shared by CLI and tray): program name `prezilla`, comments `Presentation mode switcher`, license `Apache-2.0`, website `https://github.com/dol/prezilla` (assumed, same as `nfpm.yaml`), website label `github.com/dol/prezilla`, icon name `prezilla`. No GTK/cgo: the user wants one static binary, so the "About page" is the `about` command plus a tray menu entry that uses a desktop notification and opens the website link (modelled on tunewise's tray "About" item). Exit codes: 0 success, 1 runtime error, 2 usage error.
+- About info (exact, shared by CLI and tray): program name `prezilla`, comments `Presentation mode switcher`, license `Apache-2.0`, website `https://github.com/dol/prezilla` (assumed, same as `nfpm.yaml`), website label `github.com/dol/prezilla`, icon name `prezilla`. No GTK/cgo: the user wants one static binary. Task 14-15 shipped the `about` command plus a notification; after the user judged that half-baked, Task 18 adds a real About window through `zenity --info` (optional runtime tool, recommended by the packages, notification as fallback) — decided with the user on 2026-11-07 over a pure-Go X11 window and a native cgo GTK dialog. Exit codes: 0 success, 1 runtime error, 2 usage error.
 - Config: `os.UserConfigDir()/prezilla/config.json`. State: `os.UserStateDir`-style, i.e. `$XDG_STATE_HOME/prezilla/state.json`, falling back to `~/.local/state/prezilla/state.json`.
 - No dependencies beyond stdlib except `fyne.io/systray` (tray task only), `github.com/godbus/dbus/v5` (already in the graph via systray), and — added on the user's request (they do not want to install `pactl`/`wmctrl`) — `github.com/jfreymuth/pulse` (native PulseAudio/PipeWire-pulse protocol, Task 11) and `github.com/jezek/xgbutil` (EWMH over pure-Go X11, Task 12). No cgo anywhere.
 - Runtime requirement from the user: no extra packages beyond the XFCE session itself (`xfconf-query` ships with XFCE). `pactl`, `wmctrl` and `env` must NOT be required after Task 13.
@@ -41,6 +41,9 @@
 13. No audio server running / socket missing / sink unplugged between `on` and `off`: mute errors clearly (or no-ops for a vanished sink), never panics or hangs, other switches proceed — Task 11.
 14. No `DISPLAY` / X server unreachable: minimize errors clearly, other switches proceed — Task 12.
 15. Saved state written by the tool-based version (`yes`/`no`, `<name>\tyes|no`, `on`/`off`) must still restore after upgrading to the native backends — Tasks 11 and 12.
+21. Left click on the tray icon toggles at once: a double click must not flip the mode twice into a surprise, an accidental click is undone by the next click, and a host that never calls the tapped callback still has the menu — Task 17.
+22. `zenity` missing, hung or killed: About falls back to the notification, then to a tooltip error; no zombie window after Quit; markup in the version string cannot inject links or break the dialog — Task 18.
+23. Friendlier errors must never hide the technical detail needed for a bug report (it stays in parentheses on stderr), must not change exit codes or `status` stdout, and must not tell the user to delete a file that would lose their saved originals unless the state is already unreadable — Task 19.
 11. Installed package without its icon or desktop entry (missing size, wrong `Icon=` name) looks broken in menus and the panel: `scripts/check-install.sh` over a `DESTDIR` install and over the extracted `.deb` — Task 10.
 12. A packaged binary that reports `dev` instead of the release version, or a release built without the pinned tag version — Task 10 (`prezilla version` on the extracted deb).
 8. Deadline passes while the machine is suspended: next poll/watcher wake restores immediately — Task 3 (`DisableIfExpired` with injected clock) and Task 6 (watcher polls).
@@ -405,6 +408,86 @@ Added on the user's request: "a time should be there as well" (read as a visible
 - [ ] **Step 5: Manual check (this XFCE session, `org.xfce.ScreenSaver` is present with `GetActive`/`ActiveChanged(b)` and the notification server reports the `actions` capability):** with a throwaway program under the scratchpad (not `prezilla on`), subscribe via `DBusScreenSaver` and print events while the user (or `xfce4-screensaver-command --activate`/`--deactivate` if available) triggers the screensaver, and show one sticky prompt through `DBusPrompter` and print which key comes back. Record the output. Whether the sticky prompt is visible while xfce4-notifyd's do-not-disturb is on is for the user to check by eye and must be reported as unverified.
 - [ ] **Step 6: Update `README.md`** (timer item, screensaver prompt, the do-not-disturb caveat and the menu fallback) and `CHANGELOG.md`.
 - [ ] **Step 7: Commit** `feat: tray timer and screensaver continue prompt`.
+
+---
+
+### Task 17: Tray UX pass (menu, one-click, icon states, copy)
+
+Added after the user judged the tray "half-baked" and a `better-interface` review (all six `better-*` domains) found: the toggle item showed the CURRENT state as its title (clicking "Not presenting" starts presenting), icon states differed mostly by hue (measured idle `#8A8F98` 2.85:1 and active `#2ECC71` 1.84:1 on a `#f0f0f0` panel, 1.55:1 apart), the primary action was buried in the menu, the timer line is a disabled item that keyboard/AT users cannot reach, and the vocabulary was inconsistent.
+
+**Files:**
+- Modify: `internal/tray/tray.go`, `internal/tray/prompt.go`, `internal/tray/tray_test.go`, `internal/tray/prompt_test.go`, `packaging/icons/prezilla-tray-idle.svg`, `packaging/icons/prezilla-tray-active.svg`, `internal/tray/icons/idle.png`, `internal/tray/icons/active.png` (re-rendered with `scripts/render-icons.sh`), `internal/tray/icons/icons_test.go`, `README.md`, `CHANGELOG.md`
+
+**Interfaces / exact values:**
+- Menu, in this order (conditional items hidden when not applicable; no separator above the first group):
+  1. `Keep presenting (+30 min)` — only while a screensaver question is pending; the number is `continueStep` in minutes (30 when `timeout_minutes` is 0); same action as the old Continue.
+  2. `Stop presenting` — only while a question is pending; same action as the old End.
+  3. checkbox `Presentation mode` created with `systray.AddMenuItemCheckbox("Presentation mode", "Turn presentation mode on or off", false)`; checked iff the mode is active; its title NEVER changes.
+  4. `Ends 15:04 · 12 min left` — disabled, only while a deadline exists (`timerLabel`, unchanged format).
+  5. `Extend by 30 min` — enabled, only while a deadline exists (minutes = `continueStep`); a click calls `Engine.Extend(ctx, continueStep(cfg.Timeout))` off the systray goroutine under `core.OperationTimeout`, ignoring double clicks while one runs; a `(false, nil)` result is a no-op; errors go to stderr and the tooltip like other actions.
+  6. separator; `About prezilla`; `Open project website`; separator; `Quit`.
+- Left click on the tray icon toggles presentation mode: `systray.SetOnTapped(func(){…})` forwards into the same channel/handler as the checkbox click (one code path). The menu stays on right click. If the host never calls the tapped callback the menu still works.
+- Copy (exact): screensaver question — notification Summary `Keep presenting?`, Body `The screensaver started with 12 min left.` (minutes via `remainingText`, with a non-breaking space between number and `min`: `12 min left`), actions `{keep, "Keep presenting (+30 min)"}` and `{stop, "Stop presenting"}` (keys `continue`/`end` may stay as internal identifiers); tooltip line `Screensaver started. Keep presenting?`. `remainingText` returns `N min left`. `Labels()` stays for the tooltip only: `prezilla: presentation mode on` / `off`.
+- Icons: idle = OUTLINED screen (32-unit stroke, transparent inside), toggle pill with the knob on the LEFT, colour `#7A7A7A`; active = FILLED screen, white pill with the knob on the RIGHT, colour `#1A9B4A`. Both measured at ≥ 3:1 on `#f0f0f0` and `#2b2b2b` (idle 3.77/3.30, active 3.16/3.93). The state must be readable from shape alone (outline vs filled), not hue. Keep the 512 viewBox and the ≥ 32-unit minimum feature size; app icon `prezilla.svg` unchanged.
+
+- [ ] **Step 1: Write failing tests:** menu-model tests through a small pure helper that returns the item states for `(active, hasDeadline, pending, step)` (titles, visible, enabled, checked) covering: inactive; active without deadline; active with deadline; pending question (items 1-2 visible, shown above the checkbox in order); the checkbox title never changes; `remainingText` uses the non-breaking space; prompt strings exact; tooltip line exact; `continueStep` minutes in labels (30 and 45); the extend helper (fake engine: `(true,nil)`, `(false,nil)`, error → tooltip text, overlapping clicks ignored); in `icons_test.go`: `TestActiveIconIsFilledIdleIsOutlined` (opaque-pixel coverage of active ≥ 1.6× idle) and `TestTrayIconColoursKeepContrast` (decode the dominant opaque colour of each PNG and assert contrast ≥ 3.0 against `#f0f0f0` and `#2b2b2b`).
+- [ ] **Step 2: Run** `go test ./internal/tray/...` — Expected: FAIL.
+- [ ] **Step 3: Rewrite the SVGs and re-render** (`bash scripts/render-icons.sh`); look at the 16 px and 64 px results with the Read tool and confirm outline-versus-filled is unmistakable at 16 px; adjust the SVGs if not.
+- [ ] **Step 4: Implement** the pure menu-state helper, the new menu construction and ordering, `SetOnTapped`, the extend action, the copy changes and the non-breaking space; keep every earlier behaviour (toggler, coordinator, polling, spawnIfDeadline, host detection, nil-safety).
+- [ ] **Step 5: Run** `go vet ./... && go test -race -count=1 ./...` — Expected: PASS.
+- [ ] **Step 6: Manual check** (throwaway program, nothing committed; never `prezilla on|toggle|tray` on the real desktop): print the computed menu model for the four states and confirm the hue-independent icon difference by reading the rendered PNGs. Left-click delivery and the checkbox rendering in the XFCE panel are checked by the user and reported as unverified.
+- [ ] **Step 7: Update `README.md`** (menu, one-click toggle, Extend, new wording) and `CHANGELOG.md` `[Unreleased]`.
+- [ ] **Step 8: Commit** `feat(tray): clear menu, one-click toggle, outline/filled icon states`.
+
+---
+
+### Task 18: About window via zenity, notification fallback
+
+**Files:**
+- Create: `internal/system/aboutwindow.go`, `internal/system/aboutwindow_test.go`; Modify: `internal/tray/tray.go`, `internal/tray/tray_test.go`, `cmd/prezilla/main.go`, `nfpm.yaml`, `README.md`, `CHANGELOG.md`
+
+**Interfaces:**
+- Consumes: `about.Info`, `system.Runner`/`ExecRunner`, the `Notifier` fallback from Task 15.
+- Produces: `type system.AboutWindow interface { Show(ctx context.Context, info about.Info) error }`; `type ZenityAbout struct{ Runner Runner }` implementing it; `var ErrNoZenity = errors.New("about: zenity not found")`; `tray.Config` gains `AboutWindow system.AboutWindow` (nil = notification only).
+- `ZenityAbout.Show`: runs `zenity --version` first (error → `ErrNoZenity` when the binary is missing); major version 3 uses `--icon-name=<IconName>`, otherwise `--icon=<IconName>`; then runs `zenity --info --title=About prezilla --width=380 --ok-label=Close --modal <icon flag> --text=<markup>` (argv, never a shell) where `<markup>` is exactly `<b>prezilla</b> <version>\n<comments>\n\nLicense: <license>\n<a href="<website>"><websiteLabel></a>` with every dynamic value escaped for Pango markup (`&`, `<`, `>`, `"`, `'`). The window waits for the user, so it runs with the caller's ctx and a long timeout (`ExecRunner{Timeout: 30 * time.Minute}` built in `main.go`); Quit cancels it. A second click while the window is open is ignored.
+- Tray: `About prezilla` calls `AboutWindow.Show`; on `ErrNoZenity` (or any error from a nil/failed window) it falls back to the existing notification path (`aboutAction`), and only if that also fails does the tooltip show an error. Menu title stays `About prezilla`.
+- `nfpm.yaml`: add `recommends: [zenity]` for deb and rpm (Arch has no recommends; leave a comment).
+
+- [ ] **Step 1: Write failing tests** with `FakeRunner`: `zenity --version` missing → `ErrNoZenity`; version `3.44.0` uses `--icon-name`, `4.2.1` uses `--icon`; exact argv incl. the exact markup string for `about.New("1.2.3")`; markup escaping (`Version: "1<2&3"`); tray helper: window success → no notification; `ErrNoZenity` → notification sent once; both fail → error text; second click while open is ignored.
+- [ ] **Step 2: Run** `go test ./internal/system/... ./internal/tray/...` — Expected: FAIL.
+- [ ] **Step 3: Implement** `aboutwindow.go`, the tray wiring with the open-window guard and fallback, `main.go` wiring, `nfpm.yaml`.
+- [ ] **Step 4: Run** `go vet ./... && go test -race -count=1 ./...` — Expected: PASS.
+- [ ] **Step 5: Manual check:** with a throwaway program run the real `zenity --info … --timeout=3` with the real markup once so the window opens and closes itself (record `zenity --version`, exit status, and any stderr); report that the logo and link look are for the user to judge and are unverified.
+- [ ] **Step 6: Update `README.md`** (About opens a window; `zenity` optional; fallback) and `CHANGELOG.md`.
+- [ ] **Step 7: Commit** `feat(tray): about window via zenity with notification fallback`.
+
+---
+
+### Task 19: Plain-language errors with a next step
+
+**Files:**
+- Create: `internal/usererr/usererr.go`, `internal/usererr/usererr_test.go`; Modify: `internal/cli/cli.go`, `internal/cli/cli_test.go`, `internal/tray/tray.go`, `internal/tray/tray_test.go`, `cmd/prezilla/main.go`, `README.md`, `CHANGELOG.md`
+
+**Interfaces:**
+- Produces: `package usererr`: `func Explain(err error) string` (plain sentence + next step, followed by ` (details: <technical text>)`; for `errors.Join` results one line per error) and `func Short(err error) string` (the sentence only, for tooltips). Unknown errors pass through unchanged (`Explain` returns `err.Error()`, `Short` too).
+- Mapping (exact sentences; `<path>`/`<desktop>` filled from the error text):
+  - `mute:` + `pulse:` → `Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json.`
+  - `minimize:` + `x11:` → `Couldn't show the desktop: no X display is reachable (prezilla needs an X11 session). Log in to an X11 session, or remove "minimize" from "switches" in config.json.`
+  - `icons:`/`notifications:`/`wallpaper:` + `executable file not found` → `Couldn't change <desktop icons|notifications|the wallpaper>: xfconf-query was not found. prezilla needs an XFCE session.`
+  - `wallpaper:` + `no image configured` → `Couldn't change the wallpaper: no image is set. Set "wallpaper" to an image path in config.json, or remove "wallpaper" from "switches".`
+  - `lock … timed out` → `Another prezilla action is still running. Wait a moment and try again.`
+  - `parse state <path>` → `prezilla's saved state (<path>) is unreadable, so it can't restore your settings automatically. Turn desktop icons, notifications, sound and windows back on by hand, then delete that file.`
+  - `parse config <path>` → `The configuration file (<path>) isn't valid JSON. Fix it, or delete it to use the defaults.`
+  - `unsupported desktop "<desktop>"` → `prezilla supports XFCE only (this session reports "<desktop>"). Run it inside an XFCE session.`
+  - errors already carrying `use "prezilla toggle" from the command line` pass through.
+- CLI `fail(...)` prints `usererr.Explain(err)`; the tray's tooltip and `lastErr` paths use `usererr.Short`; stderr in the tray keeps `Explain`. Exit codes and ALL stdout (including the exact `status` forms) are unchanged.
+
+- [ ] **Step 1: Write failing tests:** one table row per mapping above (input error built from the real error constructors or exact texts → exact output), `errors.Join` of two switch errors gives two lines, unknown errors unchanged, `Short` omits the details, CLI test that an engine error prints the explained text to stderr with exit 1 and nothing to stdout, tray tooltip test using `Short`.
+- [ ] **Step 2: Run** `go test ./internal/usererr/... ./internal/cli/... ./internal/tray/...` — Expected: FAIL.
+- [ ] **Step 3: Implement** `usererr`, wire it into `cli.fail`, the tray error paths and `main.go` error prints.
+- [ ] **Step 4: Run** `go vet ./... && go test -race -count=1 ./...` — Expected: PASS.
+- [ ] **Step 5: Update `README.md` troubleshooting** to quote the new sentences and `CHANGELOG.md`.
+- [ ] **Step 6: Commit** `feat: plain-language errors with a next step`.
 
 ---
 
