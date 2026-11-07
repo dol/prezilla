@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
+
+	"prezilla/internal/core"
 )
 
 const (
@@ -91,6 +95,12 @@ func cases() []struct {
 		{"presentation unexpected value", errors.New("presentation: read presentation mode: unexpected value \"yes\""),
 			`Couldn't change the power manager's presentation mode: its setting isn't a yes/no value. Reset it in the power manager's settings, or remove "presentation" from "switches" in config.json.`},
 		{"wallpaper no image", errors.New(`wallpaper: wallpaper: no image configured (set "wallpaper" in config)`), sWall},
+		{"wallpaper image gone", errors.New("wallpaper: wallpaper: image not found: /home/u/Pictures/pres.png"),
+			`Couldn't change the wallpaper: the image /home/u/Pictures/pres.png no longer exists. Choose another image from the tray menu, or fix "wallpaper" in config.json.`},
+		{"config save", fmt.Errorf("write config %s: %w", "/home/u/.config/prezilla/config.json", errors.New("no space left on device")),
+			`Couldn't save your choice to /home/u/.config/prezilla/config.json. It stays in effect until presentation mode ends, then the saved setting applies again.`},
+		{"config save wrapped", fmt.Errorf("save config %s: %w", "/c/config.json", errors.New("read-only file system")),
+			`Couldn't save your choice to /c/config.json. It stays in effect until presentation mode ends, then the saved setting applies again.`},
 		{"lock", lock, sLock},
 		{"parse state", errors.New("parse state /home/u/.local/state/prezilla/state.json: invalid character 'x' looking for beginning of value"),
 			"Prezilla's saved state (/home/u/.local/state/prezilla/state.json) is unreadable, so it can't restore your settings automatically. Turn desktop icons, notifications, sound and windows back on and set your wallpaper again by hand (the old wallpaper path may still be readable in that file), then delete that file."},
@@ -236,5 +246,26 @@ func TestJoinSentences(t *testing.T) {
 		if got := JoinSentences(c.parts...); got != c.want {
 			t.Errorf("%q: got %q want %q", c.parts, got, c.want)
 		}
+	}
+}
+
+// The sentence must match the text core.UpdateConfig really produces.
+func TestConfigSaveMatchesRealUpdateConfigError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"switches":["mute"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil { // the atomic write cannot create its temp file
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	_, err := core.UpdateConfig(path, func(*core.Config) {})
+	if err == nil {
+		t.Skip("UpdateConfig did not fail here")
+	}
+	want := "Couldn't save your choice to " + path + ". It stays in effect until presentation mode ends, then the saved setting applies again."
+	if got := Short(err); got != want {
+		t.Errorf("Short = %q\nwant %q\n(raw error: %v)", got, want, err)
 	}
 }

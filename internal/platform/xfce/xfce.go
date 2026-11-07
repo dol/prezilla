@@ -42,3 +42,23 @@ func All(b system.Backends, cfg core.Config) []core.Switch {
 		NewWallpaper(b.Xfconf, cfg.Wallpaper),
 	}
 }
+
+// New builds the single switch with the given ID, or false for an unknown ID.
+// It uses the same constructors as Switches and All.
+func New(b system.Backends, id, image string) (core.Switch, bool) {
+	switch id {
+	case core.IDIcons:
+		return NewIcons(b.Xfconf), true
+	case core.IDNotifications:
+		return NewNotifications(b.Xfconf), true
+	case core.IDPresentation:
+		return NewPresentation(b.Xfconf), true
+	case core.IDMute:
+		return NewMute(b.Audio), true
+	case core.IDMinimize:
+		return NewMinimize(b.Windows), true
+	case core.IDWallpaper:
+		return NewWallpaper(b.Xfconf, image), true
+	}
+	return nil, false
+}

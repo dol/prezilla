@@ -71,3 +71,17 @@ func TestAllSwitchesReturnsEveryKnownSwitchInFixedOrder(t *testing.T) {
 		t.Error("expected error for unknown desktop")
 	}
 }
+
+func TestSwitchBuildsOneAndRejectsUnsupportedDesktop(t *testing.T) {
+	b := system.Backends{Runner: &system.FakeRunner{}, Xfconf: &system.FakeXfconf{}, Audio: &system.FakeAudio{}, Windows: &system.FakeWindows{}}
+	sw, err := Switch("xfce", b, core.IDMute, "")
+	if err != nil || sw == nil || sw.ID() != core.IDMute {
+		t.Fatalf("got %v, %v", sw, err)
+	}
+	if _, err := Switch("xfce", b, "bogus", ""); err == nil {
+		t.Error("expected error for unknown switch")
+	}
+	if _, err := Switch("gnome", b, core.IDMute, ""); err == nil || !strings.Contains(err.Error(), `unsupported desktop "gnome"`) {
+		t.Errorf("got %v", err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -626,22 +627,34 @@ func wpFake() *system.FakeXfconf {
 
 func setS(prop, v string) string { return "Set " + dsk + prop + " string:" + v }
 
+// presImage is an existing image file, so the stale-image check passes.
+func presImage(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "pres.png")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestWallpaperChangesEveryMonitorAndWorkspaceProperty(t *testing.T) {
+	pres := presImage(t)
 	f := wpFake()
-	saved, err := NewWallpaper(f, "/img/pres.png").Enable(ctx)
+	saved, err := NewWallpaper(f, pres).Enable(ctx)
 	if err != nil || saved == "" {
 		t.Fatalf("got (%q, %v)", saved, err)
 	}
-	has(t, f, setS(wpA, "/img/pres.png"))
-	has(t, f, setS(wpB, "/img/pres.png"))
-	lacks(t, f, setS("/desktop-icons/style", "/img/pres.png"))
+	has(t, f, setS(wpA, pres))
+	has(t, f, setS(wpB, pres))
+	lacks(t, f, setS("/desktop-icons/style", pres))
 	if f.Props[dsk+"/backdrop/screen0/monitor0/workspace0/image-style"] != system.XfInt(5) {
 		t.Error("other backdrop property touched")
 	}
 }
 
 func TestWallpaperSavedStateIsJSONOfOriginals(t *testing.T) {
-	saved, err := NewWallpaper(wpFake(), "/img/pres.png").Enable(ctx)
+	pres := presImage(t)
+	saved, err := NewWallpaper(wpFake(), pres).Enable(ctx)
 	want := `{"` + wpA + `":"/img/a.png","` + wpB + `":"/img/b.png"}`
 	if err != nil || saved != want {
 		t.Fatalf("got (%q, %v) want %q", saved, err, want)
@@ -649,8 +662,9 @@ func TestWallpaperSavedStateIsJSONOfOriginals(t *testing.T) {
 }
 
 func TestWallpaperDisableRestoresEachOriginal(t *testing.T) {
+	pres := presImage(t)
 	f := wpFake()
-	sw := NewWallpaper(f, "/img/pres.png")
+	sw := NewWallpaper(f, pres)
 	saved, err := sw.Enable(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -663,8 +677,9 @@ func TestWallpaperDisableRestoresEachOriginal(t *testing.T) {
 }
 
 func TestWallpaperDisableContinuesAfterFailure(t *testing.T) {
+	pres := presImage(t)
 	f := wpFake()
-	sw := NewWallpaper(f, "/img/pres.png")
+	sw := NewWallpaper(f, pres)
 	saved, _ := sw.Enable(ctx)
 	f.Err = map[string]error{setS(wpA, "/img/a.png"): errors.New("boom")}
 	err := sw.Disable(ctx, saved)
@@ -681,44 +696,48 @@ func TestWallpaperDisableBadSavedErrors(t *testing.T) {
 }
 
 func TestWallpaperNoPropertiesErrors(t *testing.T) {
+	pres := presImage(t)
 	f := props(dsk+"/desktop-icons/style", system.XfInt(2))
-	_, err := NewWallpaper(f, "x").Enable(ctx)
+	_, err := NewWallpaper(f, pres).Enable(ctx)
 	if err == nil || !strings.Contains(err.Error(), "no wallpaper properties found") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 func TestWallpaperListFailureIsReported(t *testing.T) {
+	pres := presImage(t)
 	f := wpFake()
 	f.Err = map[string]error{"List " + dsk + "/backdrop": errors.New("no daemon")}
-	if _, err := NewWallpaper(f, "x").Enable(ctx); err == nil || !strings.HasPrefix(err.Error(), "list wallpapers: ") {
+	if _, err := NewWallpaper(f, pres).Enable(ctx); err == nil || !strings.HasPrefix(err.Error(), "list wallpapers: ") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 func TestWallpaperEnableSetFailureRollsBackIncludingFailingProp(t *testing.T) {
+	pres := presImage(t)
 	wpC := "/backdrop/screen0/monitor2/workspace0/last-image"
 	f := wpFake()
 	f.Props[dsk+wpC] = system.XfString("/img/c.png")
-	f.Err = map[string]error{setS(wpB, "/img/pres.png"): errors.New("boom")}
-	if _, err := NewWallpaper(f, "/img/pres.png").Enable(ctx); err == nil {
+	f.Err = map[string]error{setS(wpB, pres): errors.New("boom")}
+	if _, err := NewWallpaper(f, pres).Enable(ctx); err == nil {
 		t.Fatal("expected error")
 	}
 	has(t, f, setS(wpA, "/img/a.png"))
 	has(t, f, setS(wpB, "/img/b.png"))
-	lacks(t, f, setS(wpC, "/img/pres.png"))
+	lacks(t, f, setS(wpC, pres))
 }
 
 func TestWallpaperEmptyOriginalIsSkipped(t *testing.T) {
+	pres := presImage(t)
 	f := wpFake()
 	f.Props[dsk+wpB] = system.XfString("")
-	sw := NewWallpaper(f, "/img/pres.png")
+	sw := NewWallpaper(f, pres)
 	saved, err := sw.Enable(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	has(t, f, setS(wpA, "/img/pres.png"))
-	lacks(t, f, setS(wpB, "/img/pres.png"))
+	has(t, f, setS(wpA, pres))
+	lacks(t, f, setS(wpB, pres))
 	if strings.Contains(saved, wpB) {
 		t.Fatalf("saved %q contains empty prop", saved)
 	}
@@ -739,6 +758,31 @@ func TestMuteSinkListFailureStillAttemptsUnmute(t *testing.T) {
 		t.Fatal(err)
 	}
 	hasA(t, f, "SetSinkMute "+sinkA+" false")
+}
+
+func TestWallpaperMissingImageFailsBeforeAnyXfconfCall(t *testing.T) {
+	f := wpFake()
+	missing := filepath.Join(t.TempDir(), "gone.png")
+	_, err := NewWallpaper(f, missing).Enable(ctx)
+	if err == nil || !strings.HasPrefix(err.Error(), "wallpaper: image not found: "+missing) {
+		t.Fatalf("got %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
+func TestNewBuildsEveryKnownSwitchAndRejectsUnknown(t *testing.T) {
+	b := system.Backends{Xfconf: &system.FakeXfconf{}, Audio: &system.FakeAudio{}, Windows: &system.FakeWindows{}}
+	for _, id := range []string{core.IDIcons, core.IDNotifications, core.IDPresentation, core.IDMute, core.IDMinimize, core.IDWallpaper} {
+		sw, ok := New(b, id, "/img/x.png")
+		if !ok || sw == nil || sw.ID() != id {
+			t.Errorf("New(%q) = %v, %v", id, sw, ok)
+		}
+	}
+	if sw, ok := New(b, "bogus", ""); ok || sw != nil {
+		t.Errorf("New(bogus) = %v, %v", sw, ok)
+	}
 }
 
 func TestWallpaperWithoutImageErrorsWithoutTouchingXfconf(t *testing.T) {

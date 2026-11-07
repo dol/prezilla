@@ -46,6 +46,7 @@ var (
 	saveStateRE   = regexp.MustCompile(`^save state: write state (.+?): `)
 	parseStateRE  = regexp.MustCompile(`(?:^|: )parse state (.+?): `)
 	parseConfigRE = regexp.MustCompile(`(?:^|: )parse config (.+?): `)
+	saveConfigRE  = regexp.MustCompile(`(?:^|: )(?:save|write) config (.+?): `)
 	unsupportedRE = regexp.MustCompile(`(?:^|: )unsupported desktop "([^"]*)"`)
 )
 
@@ -202,6 +203,19 @@ var rules = []rule{
 	{"wallpaper: no image", func(_ error, text string) (string, bool) {
 		if hasSwitchPrefix(text, idWallpaper) && strings.Contains(text, "no image configured") {
 			return `Couldn't change the wallpaper: no image is set. Set "wallpaper" to an image path in config.json, or remove "wallpaper" from "switches".`, true
+		}
+		return "", false
+	}},
+	{"wallpaper: image gone", func(_ error, text string) (string, bool) {
+		if i := strings.Index(text, "wallpaper: image not found: "); i >= 0 && (i == 0 || strings.HasSuffix(text[:i], ": ")) {
+			path := strings.TrimSpace(text[i+len("wallpaper: image not found: "):])
+			return fmt.Sprintf(`Couldn't change the wallpaper: the image %s no longer exists. Choose another image from the tray menu, or fix "wallpaper" in config.json.`, path), true
+		}
+		return "", false
+	}},
+	{"config cannot be saved", func(_ error, text string) (string, bool) {
+		if m := saveConfigRE.FindStringSubmatch(text); m != nil {
+			return fmt.Sprintf("Couldn't save your choice to %s. It stays in effect until presentation mode ends, then the saved setting applies again.", m[1]), true
 		}
 		return "", false
 	}},

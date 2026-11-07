@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -31,6 +32,12 @@ func (s wallpaper) set(ctx context.Context, prop, value string) error {
 func (s wallpaper) Enable(ctx context.Context) (string, error) {
 	if s.image == "" {
 		return "", errors.New(`wallpaper: no image configured (set "wallpaper" in config)`)
+	}
+	if _, err := os.Stat(s.image); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("wallpaper: image not found: %s", s.image)
+		}
+		return "", fmt.Errorf("wallpaper: image %s: %w", s.image, err)
 	}
 	all, err := s.x.List(ctx, desktopChannel, backdropPrefix)
 	if err != nil {
