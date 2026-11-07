@@ -21,6 +21,7 @@ const (
 	sMinRestore  = `Couldn't bring your windows back: no X display is reachable (Prezilla needs an X11 session). Run "prezilla off" again in an X11 session.`
 	sMuteRestore = `Couldn't restore the sound: no PulseAudio or PipeWire server is running. Start your sound server, then run "prezilla off" again.`
 	sLock        = `Another Prezilla action is still running. Wait a moment and try again.`
+	sPortal      = `Couldn't open the file chooser: the desktop's file chooser portal failed. Set "wallpaper" in config.json instead.`
 	sWall        = `Couldn't change the wallpaper: no image is set. Set "wallpaper" to an image path in config.json, or remove "wallpaper" from "switches".`
 )
 
@@ -114,6 +115,10 @@ func cases() []struct {
 		// The shape system.ZenityChooser returns: two %w, one error.
 		{"chooser could not start", fmt.Errorf("file chooser: %w: %w", errors.New("zenity could not start its window"), errors.New("exit status 1")),
 			`Couldn't open the file chooser: zenity could not start its window. Check that your desktop session is running, or set "wallpaper" in config.json.`},
+		// The shapes system.PortalChooser returns for a portal that failed.
+		{"portal ended the dialog", fmt.Errorf("file chooser: portal: %w: the dialog ended with response 2", system.ErrPortalFailed), sPortal},
+		{"portal error reply", fmt.Errorf("file chooser: portal: %w: open: %w", system.ErrPortalFailed,
+			dbus.Error{Name: "org.freedesktop.portal.Error.Failed", Body: []any{"boom"}}), sPortal},
 		{"no switch ticked", fmt.Errorf("toggle: %w", core.ErrNoSwitches),
 			`No switch is ticked, so presentation mode would change nothing. Tick at least one switch in the tray menu, or add one to "switches" in config.json.`},
 	}

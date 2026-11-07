@@ -258,6 +258,12 @@ var rules = []rule{
 		}
 		return "", false
 	}},
+	{"file chooser portal failed", func(err error, _ string) (string, bool) {
+		if errors.Is(err, system.ErrPortalFailed) {
+			return `Couldn't open the file chooser: the desktop's file chooser portal failed. Set "wallpaper" in config.json instead.`, true
+		}
+		return "", false
+	}},
 	{"no switch ticked", func(err error, _ string) (string, bool) {
 		if errors.Is(err, core.ErrNoSwitches) {
 			return `No switch is ticked, so presentation mode would change nothing. Tick at least one switch in the tray menu, or add one to "switches" in config.json.`, true
