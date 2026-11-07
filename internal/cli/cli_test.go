@@ -281,3 +281,42 @@ func TestRunWatchExitsWhenAlreadyInactive(t *testing.T) {
 		t.Errorf("code %d", c)
 	}
 }
+
+type flakyDisable struct {
+	fakeSwitch
+	failures int
+	attempts int
+}
+
+func (f *flakyDisable) Disable(ctx context.Context, saved string) error {
+	f.attempts++
+	if f.attempts <= f.failures {
+		return errors.New("restore failed")
+	}
+	return f.fakeSwitch.Disable(ctx, saved)
+}
+
+func TestRunWatchRetriesAfterPartialDisableFailure(t *testing.T) {
+	h := newHarness(t)
+	sw := &flakyDisable{fakeSwitch: fakeSwitch{id: "icons"}, failures: 2}
+	store := core.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	h.d.Engine = core.NewEngine([]core.Switch{sw}, store, h.clk.now)
+	h.run("on", "--for", "5m")
+	h.clk.advance(time.Hour)
+	done := make(chan int, 1)
+	go func() { done <- Run(context.Background(), []string{"watch"}, &bytes.Buffer{}, &bytes.Buffer{}, h.d) }()
+	select {
+	case c := <-done:
+		if c != 0 {
+			t.Errorf("code %d", c)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch did not finish")
+	}
+	if h.state(t).Active {
+		t.Error("still active")
+	}
+	if sw.attempts != 3 {
+		t.Errorf("attempts %d, want 3", sw.attempts)
+	}
+}

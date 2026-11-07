@@ -122,22 +122,19 @@ func runStatus(ctx context.Context, out, errOut io.Writer, d Deps) int {
 	return 0
 }
 
-// runWatch polls until the mode is inactive or has been disabled on expiry.
+// runWatch polls until the mode is inactive. A failed disable on expiry is
+// retried on the next poll; the engine only retries entries still saved.
 func runWatch(ctx context.Context, errOut io.Writer, d Deps) int {
 	for {
-		disabled, err := d.Engine.DisableIfExpired(ctx)
-		if err != nil {
-			return fail(errOut, err)
-		}
-		if disabled {
-			return 0
-		}
 		st, err := d.Engine.Status()
 		if err != nil {
 			return fail(errOut, err)
 		}
 		if !st.Active {
 			return 0
+		}
+		if _, err := d.Engine.DisableIfExpired(ctx); err != nil {
+			fmt.Fprintln(errOut, err)
 		}
 		select {
 		case <-ctx.Done():
