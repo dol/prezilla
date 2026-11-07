@@ -29,7 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - GitHub Actions CI and release workflows.
 
 ### Changed
-- `wallpaper` in `config.json` adds the `wallpaper` switch only when the file has no `switches` key; a `switches` list is used exactly as written.
+- `wallpaper` in `config.json` adds the `wallpaper` switch only when the file has no `switches` key; a `switches` list is used exactly as written. If your file lists `switches` and sets `wallpaper`, add "wallpaper" to `switches` to keep it.
 - Icons, notifications and wallpaper (and the new presentation switch) talk to the XFCE settings daemon (`xfconfd`) directly over the D-Bus session bus instead of running `xfconf-query`, which is no longer needed. A settings service that cannot be reached is reported as a plain sentence with a next step.
 - The product is written "Prezilla" in all user-visible text (About window, tray, notifications, desktop entry); the command, package and paths stay `prezilla`.
 - Tray icons tell the state by shape, not only hue: an outlined grey (`#7A7A7A`) screen while off and a filled green (`#1A9B4A`) screen while presenting, both at least 3:1 against light and dark panels.

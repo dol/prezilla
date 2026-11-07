@@ -63,13 +63,13 @@ Prezilla reads `~/.config/prezilla/config.json`. Every key is optional:
 
 ```json
 {
-  "switches": ["icons", "notifications", "presentation", "mute", "minimize"],
+  "switches": ["icons", "notifications", "presentation", "mute", "minimize", "wallpaper"],
   "wallpaper": "/home/me/Pictures/presenting.png",
   "timeout_minutes": 30
 }
 ```
 
-The tray menu writes `switches` and `wallpaper` for you. In a file without a `switches` key, setting `wallpaper` adds the `wallpaper` switch. Setting `timeout_minutes` to `0` removes the timer.
+The tray menu writes `switches` and `wallpaper` for you. The `wallpaper` switch needs `wallpaper` set to an image path. A `switches` list is used exactly as written, so list `wallpaper` there to change the wallpaper. In a file without a `switches` key, setting `wallpaper` adds the `wallpaper` switch. Setting `timeout_minutes` to `0` removes the timer.
 
 ## Troubleshooting
 
