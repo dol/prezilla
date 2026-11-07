@@ -9,6 +9,7 @@ package usererr
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -43,12 +44,15 @@ var nouns = map[string]string{
 }
 
 var (
-	saveStateRE   = regexp.MustCompile(`^save state: write state (.+?): `)
-	parseStateRE  = regexp.MustCompile(`(?:^|: )parse state (.+?): `)
-	parseConfigRE = regexp.MustCompile(`(?:^|: )parse config (.+?): `)
-	saveConfigRE  = regexp.MustCompile(`(?:^|: )(?:save|write) config (.+?): `)
-	unsupportedRE = regexp.MustCompile(`(?:^|: )unsupported desktop "([^"]*)"`)
+	saveStateRE       = regexp.MustCompile(`^save state: write state (.+?): `)
+	parseStateRE      = regexp.MustCompile(`(?:^|: )parse state (.+?): `)
+	parseConfigRE     = regexp.MustCompile(`(?:^|: )parse config (.+?): `)
+	saveConfigRE      = regexp.MustCompile(`(?:^|: )(?:save|write) config (.+?): `)
+	createConfigDirRE = regexp.MustCompile(`(?:^|: )create config dir (.+?): `)
+	unsupportedRE     = regexp.MustCompile(`(?:^|: )unsupported desktop "([^"]*)"`)
 )
+
+const saveConfigSentence = "Couldn't save your choice to %s. It stays in effect until presentation mode ends, then the saved setting applies again."
 
 // hasSwitchPrefix reports whether text starts with "<id>: ".
 func hasSwitchPrefix(text, id string) bool { return strings.HasPrefix(text, id+": ") }
@@ -214,8 +218,11 @@ var rules = []rule{
 		return "", false
 	}},
 	{"config cannot be saved", func(_ error, text string) (string, bool) {
+		if m := createConfigDirRE.FindStringSubmatch(text); m != nil {
+			return fmt.Sprintf(saveConfigSentence, filepath.Join(m[1], "config.json")), true
+		}
 		if m := saveConfigRE.FindStringSubmatch(text); m != nil {
-			return fmt.Sprintf("Couldn't save your choice to %s. It stays in effect until presentation mode ends, then the saved setting applies again.", m[1]), true
+			return fmt.Sprintf(saveConfigSentence, m[1]), true
 		}
 		return "", false
 	}},

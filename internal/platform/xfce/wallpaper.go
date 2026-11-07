@@ -33,7 +33,11 @@ func (s wallpaper) Enable(ctx context.Context) (string, error) {
 	if s.image == "" {
 		return "", errors.New(`wallpaper: no image configured (set "wallpaper" in config)`)
 	}
-	if _, err := os.Stat(s.image); err != nil {
+	fi, err := os.Stat(s.image)
+	if err == nil && fi.IsDir() {
+		return "", fmt.Errorf("wallpaper: image not found: %s", s.image)
+	}
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("wallpaper: image not found: %s", s.image)
 		}

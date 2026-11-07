@@ -772,6 +772,18 @@ func TestWallpaperMissingImageFailsBeforeAnyXfconfCall(t *testing.T) {
 	}
 }
 
+func TestWallpaperDirectoryAsImageIsStale(t *testing.T) {
+	f := wpFake()
+	dir := t.TempDir()
+	_, err := NewWallpaper(f, dir).Enable(ctx)
+	if err == nil || !strings.HasPrefix(err.Error(), "wallpaper: image not found: "+dir) {
+		t.Fatalf("got %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}
+
 func TestNewBuildsEveryKnownSwitchAndRejectsUnknown(t *testing.T) {
 	b := system.Backends{Xfconf: &system.FakeXfconf{}, Audio: &system.FakeAudio{}, Windows: &system.FakeWindows{}}
 	for _, id := range []string{core.IDIcons, core.IDNotifications, core.IDPresentation, core.IDMute, core.IDMinimize, core.IDWallpaper} {

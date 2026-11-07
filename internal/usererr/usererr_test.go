@@ -99,6 +99,8 @@ func cases() []struct {
 			`Couldn't change the wallpaper: the image /home/u/Pictures/pres.png no longer exists. Choose another image from the tray menu, or fix "wallpaper" in config.json.`},
 		{"config save", fmt.Errorf("write config %s: %w", "/home/u/.config/prezilla/config.json", errors.New("no space left on device")),
 			`Couldn't save your choice to /home/u/.config/prezilla/config.json. It stays in effect until presentation mode ends, then the saved setting applies again.`},
+		{"config dir cannot be created", fmt.Errorf("create config dir %s: %w", "/home/u/.config/prezilla", errors.New("permission denied")),
+			`Couldn't save your choice to /home/u/.config/prezilla/config.json. It stays in effect until presentation mode ends, then the saved setting applies again.`},
 		{"config save wrapped", fmt.Errorf("save config %s: %w", "/c/config.json", errors.New("read-only file system")),
 			`Couldn't save your choice to /c/config.json. It stays in effect until presentation mode ends, then the saved setting applies again.`},
 		{"lock", lock, sLock},
@@ -260,6 +262,24 @@ func TestConfigSaveMatchesRealUpdateConfigError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	_, err := core.UpdateConfig(path, func(*core.Config) {})
+	if err == nil {
+		t.Skip("UpdateConfig did not fail here")
+	}
+	want := "Couldn't save your choice to " + path + ". It stays in effect until presentation mode ends, then the saved setting applies again."
+	if got := Short(err); got != want {
+		t.Errorf("Short = %q\nwant %q\n(raw error: %v)", got, want, err)
+	}
+}
+
+func TestConfigDirCreateFailureMatchesRealUpdateConfigError(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	dir := filepath.Join(parent, "prezilla")
+	path := filepath.Join(dir, "config.json")
 	_, err := core.UpdateConfig(path, func(*core.Config) {})
 	if err == nil {
 		t.Skip("UpdateConfig did not fail here")

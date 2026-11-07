@@ -40,8 +40,8 @@ func AllSwitches(desktop string, b system.Backends, cfg core.Config) ([]core.Swi
 	return nil, fmt.Errorf("unsupported desktop %q", desktop)
 }
 
-// Switch builds the single switch id for desktop. The bool-less error form
-// reports an unsupported desktop; an unknown id yields an error too.
+// Switch builds the single switch id for desktop. An unsupported desktop or an
+// unknown id is an error.
 func Switch(desktop string, b system.Backends, id, image string) (core.Switch, error) {
 	switch desktop {
 	case "xfce":
