@@ -107,8 +107,9 @@ func (m menuModel) ordered() []itemState {
 // deadline; pending means a screensaver question is open. Keep presenting
 // and Reset timer both set the end time to step from now (Engine.Extend
 // never adds and never shortens), so Reset is shown only when that would
-// change something (less than step left) and not while the question is
-// open, where Keep presenting answers it.
+// change something (at least a minute less than step left, so right after
+// turning on, while the label still reads "N min left", there is no no-op
+// item) and not while the question is open, where Keep presenting answers it.
 func menuState(active bool, timer string, remaining time.Duration, pending bool, step time.Duration) menuModel {
 	hasDeadline := timer != ""
 	mins := stepMinutes(step)
@@ -130,7 +131,7 @@ func menuState(active bool, timer string, remaining time.Duration, pending bool,
 		Reset: itemState{
 			Title:   fmt.Sprintf("Reset timer to %d min", mins),
 			Tooltip: fmt.Sprintf("Sets the end time to %d minutes from now.", mins),
-			Visible: hasDeadline && remaining < step && !pending, Enabled: true,
+			Visible: hasDeadline && remaining <= step-time.Minute && !pending, Enabled: true,
 		},
 		Quit: itemState{Title: quitTitle(active), Tooltip: quitTooltip, Visible: true, Enabled: true},
 	}

@@ -299,7 +299,9 @@ func TestMenuStateResetVisibility(t *testing.T) {
 		pending   bool
 		want      bool
 	}{
-		{"remaining < step", timer, testTimeout - time.Second, false, true},
+		{"step - 1 min", timer, testTimeout - time.Minute, false, true},
+		{"step - 1 min + 1 s", timer, testTimeout - time.Minute + time.Second, false, false},
+		{"step - 1 s", timer, testTimeout - time.Second, false, false},
 		{"remaining == step", timer, testTimeout, false, false},
 		{"remaining > step", timer, testTimeout + time.Minute, false, false},
 		{"question pending", timer, time.Minute, true, false},
