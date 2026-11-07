@@ -486,3 +486,16 @@ func TestUsageKeepsLowercaseCommandName(t *testing.T) {
 		t.Errorf("stderr %q", h.errOut.String())
 	}
 }
+
+func TestRunOnWatcherFailurePrintsSentenceAndDetailsExit1(t *testing.T) {
+	h := newHarness(t)
+	h.d.SpawnWatcher = func() error { return errors.New("fork/exec /x: resource temporarily unavailable") }
+	if c := h.run("on"); c != 1 {
+		t.Errorf("code %d", c)
+	}
+	want := `Couldn't start the background timer, so presentation mode won't end by itself. Run "prezilla off" when you are done.` +
+		" (details: start watcher: fork/exec /x: resource temporarily unavailable)\n"
+	if got := h.errOut.String(); got != want {
+		t.Errorf("stderr %q\nwant %q", got, want)
+	}
+}

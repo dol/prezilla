@@ -428,7 +428,7 @@ func TestCoordinatorPrompterErrorKeepsMenuFallback(t *testing.T) {
 	f := newFixture(t, p)
 	f.ss.Emit(true)
 	eventually(t, "error", func() bool { return f.c.errText() != "" })
-	if got := f.c.errText(); got != "notify: server does not support actions" {
+	if got := f.c.errText(); got != "Your notification server can't show buttons. Use Keep presenting and Stop presenting in the tray menu." {
 		t.Errorf("err %q", got)
 	}
 	if !f.c.pending() {

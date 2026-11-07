@@ -93,7 +93,7 @@ func prepareTray(ctx context.Context, errOut io.Writer, d Deps) {
 	}
 	if st.Active && !st.ExpiresAt.IsZero() && d.SpawnWatcher != nil {
 		if err := d.SpawnWatcher(); err != nil {
-			fmt.Fprintf(errOut, "start watcher: %v\n", err)
+			fmt.Fprintln(errOut, usererr.Explain(fmt.Errorf("start watcher: %w", err)))
 		}
 	}
 }
@@ -141,7 +141,7 @@ func runEnable(ctx context.Context, cmd string, args []string, errOut io.Writer,
 		code = 1
 	} else if st.Active && !st.ExpiresAt.IsZero() && d.SpawnWatcher != nil {
 		if werr := d.SpawnWatcher(); werr != nil {
-			fmt.Fprintf(errOut, "start watcher: %v\n", werr)
+			fmt.Fprintln(errOut, usererr.Explain(fmt.Errorf("start watcher: %w", werr)))
 			code = 1
 		}
 	}

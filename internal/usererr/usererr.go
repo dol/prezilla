@@ -40,6 +40,7 @@ var nouns = map[string]string{
 }
 
 var (
+	saveStateRE   = regexp.MustCompile(`^save state: write state (.+?): `)
 	parseStateRE  = regexp.MustCompile(`(?:^|: )parse state (.+?): `)
 	parseConfigRE = regexp.MustCompile(`(?:^|: )parse config (.+?): `)
 	unsupportedRE = regexp.MustCompile(`(?:^|: )unsupported desktop "([^"]*)"`)
@@ -47,6 +48,15 @@ var (
 
 // hasSwitchPrefix reports whether text starts with "<id>: ".
 func hasSwitchPrefix(text, id string) bool { return strings.HasPrefix(text, id+": ") }
+
+func hasAnyPrefix(text string, prefixes ...string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(text, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // rules is the single matcher table: one row per case. Only the listed
 // prefix/cause combinations are rewritten; everything else is left alone.
@@ -60,6 +70,48 @@ var rules = []rule{
 	{"mute restore: no pulse server", func(_ error, text string) (string, bool) {
 		if hasSwitchPrefix(text, idMute) && strings.Contains(text, "unmute sink: ") && strings.Contains(text, "pulse: connect") {
 			return `Couldn't restore the sound: no PulseAudio or PipeWire server is running. Start your sound server, then run "prezilla off" again.`, true
+		}
+		return "", false
+	}},
+	{"mute enable: server timed out", func(_ error, text string) (string, bool) {
+		if hasAnyPrefix(text, "mute: read sink mute: ", "mute: mute sink: ") && strings.Contains(text, "pulse: timed out") {
+			return `Couldn't change the sound: the sound server didn't answer in time. Run "prezilla off", then try again.`, true
+		}
+		return "", false
+	}},
+	{"mute restore: server timed out", func(_ error, text string) (string, bool) {
+		if strings.HasPrefix(text, "mute: unmute sink: ") && strings.Contains(text, "pulse: timed out") {
+			return `Couldn't restore the sound: the sound server didn't answer in time. Run "prezilla off" again.`, true
+		}
+		return "", false
+	}},
+	{"minimize enable: X server timed out", func(_ error, text string) (string, bool) {
+		if hasAnyPrefix(text, "minimize: read showing desktop: ", "minimize: show desktop: ") && strings.Contains(text, "x11: timed out") {
+			return `Couldn't show the desktop: the X server didn't answer in time. Run "prezilla off", then try again.`, true
+		}
+		return "", false
+	}},
+	{"minimize restore: X server timed out", func(_ error, text string) (string, bool) {
+		if strings.HasPrefix(text, "minimize: restore desktop: ") && strings.Contains(text, "x11: timed out") {
+			return `Couldn't bring your windows back: the X server didn't answer in time. Run "prezilla off" again.`, true
+		}
+		return "", false
+	}},
+	{"state cannot be saved", func(_ error, text string) (string, bool) {
+		if m := saveStateRE.FindStringSubmatch(text); m != nil {
+			return fmt.Sprintf(`Couldn't save Prezilla's state (%s). Check free space and permissions, then run "prezilla off".`, m[1]), true
+		}
+		return "", false
+	}},
+	{"timer watcher not started", func(_ error, text string) (string, bool) {
+		if strings.HasPrefix(text, "start watcher: ") {
+			return `Couldn't start the background timer, so presentation mode won't end by itself. Run "prezilla off" when you are done.`, true
+		}
+		return "", false
+	}},
+	{"notification server has no actions", func(_ error, text string) (string, bool) {
+		if strings.HasPrefix(text, "notify: server does not support actions") {
+			return "Your notification server can't show buttons. Use Keep presenting and Stop presenting in the tray menu.", true
 		}
 		return "", false
 	}},
