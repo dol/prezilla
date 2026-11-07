@@ -26,12 +26,12 @@ const (
 
 var errNoHost = errors.New(`no system tray (StatusNotifier host) found; use "prezilla toggle" from the command line`)
 
-// Labels returns the menu title and tooltip for the given state.
-func Labels(active bool) (title, tooltip string) {
+// Labels returns the tooltip's first words for the given state.
+func Labels(active bool) string {
 	if active {
-		return "Presenting", "prezilla: presentation mode on"
+		return "prezilla: presentation mode on"
 	}
-	return "Not presenting", "prezilla: presentation mode off"
+	return "prezilla: presentation mode off"
 }
 
 // Icon returns the embedded PNG for the given state.
@@ -43,13 +43,14 @@ func Icon(active bool) []byte {
 }
 
 // remainingText formats the time left until expires, rounded up to whole
-// minutes; it is empty when there is no deadline or it has passed.
+// minutes, with a non-breaking space so "12 min" never wraps; it is empty
+// when there is no deadline or it has passed.
 func remainingText(now, expires time.Time) string {
 	if expires.IsZero() || !expires.After(now) {
 		return ""
 	}
 	mins := int((expires.Sub(now) + time.Minute - 1) / time.Minute)
-	return fmt.Sprintf("%d min left", mins)
+	return fmt.Sprintf("%d\u00a0min left", mins)
 }
 
 // tooltip composes the tooltip: the state label, the remaining time when
@@ -57,7 +58,7 @@ func remainingText(now, expires time.Time) string {
 // (both are shown, joined with "; "), plus a second line while a screensaver
 // prompt is pending.
 func tooltip(active bool, remaining, toggleErr, expiryErr string, prompting bool) string {
-	_, tip := Labels(active)
+	tip := Labels(active)
 	if remaining != "" {
 		tip += ", " + remaining
 	}
@@ -74,6 +75,77 @@ func tooltip(active bool, remaining, toggleErr, expiryErr string, prompting bool
 		tip += "\n" + promptLine
 	}
 	return tip
+}
+
+// The checkbox's title and hover text never change; its checkmark shows
+// the state.
+const (
+	modeTitle   = "Presentation mode"
+	modeTooltip = "Turn presentation mode on or off"
+)
+
+// itemState is what one menu item should show.
+type itemState struct {
+	Title   string
+	Tooltip string
+	Visible bool
+	Enabled bool
+	Checked bool
+}
+
+// menuModel is the state of the menu items that change at runtime, named
+// after their role. About and Quit never change.
+type menuModel struct {
+	Keep, Stop, Mode, Timer, Extend itemState
+}
+
+// ordered returns the items in menu order.
+func (m menuModel) ordered() []itemState {
+	return []itemState{m.Keep, m.Stop, m.Mode, m.Timer, m.Extend}
+}
+
+// menuState decides the changing menu items. timer is timerLabel's text and
+// is empty without a live deadline; pending means a screensaver question is
+// open; step is how far Keep presenting and Extend move the deadline.
+func menuState(active bool, timer string, pending bool, step time.Duration) menuModel {
+	hasDeadline := timer != ""
+	mins := stepMinutes(step)
+	return menuModel{
+		Keep: itemState{
+			Title:   keepTitle(step),
+			Tooltip: fmt.Sprintf("Keeps presentation mode on until %d minutes from now.", mins),
+			Visible: pending, Enabled: true,
+		},
+		Stop: itemState{
+			Title: stopTitle, Tooltip: "Turns presentation mode off now.",
+			Visible: pending, Enabled: true,
+		},
+		Mode: itemState{Title: modeTitle, Tooltip: modeTooltip, Visible: true, Enabled: true, Checked: active},
+		Timer: itemState{
+			Title: timer, Tooltip: "Presentation mode turns off by itself at this time.",
+			Visible: hasDeadline,
+		},
+		Extend: itemState{
+			Title:   fmt.Sprintf("Extend by %d min", mins),
+			Tooltip: fmt.Sprintf("Keeps presentation mode on until %d minutes from now.", mins),
+			Visible: hasDeadline, Enabled: true,
+		},
+	}
+}
+
+// startExtend runs one Extend call on xt, detached from ctx's cancellation
+// and bounded by core.OperationTimeout, unless one is already running. A
+// (false, nil) result (the session ended meanwhile) changes nothing; an
+// error is recorded in a for the tooltip and printed to stderr. done runs
+// afterwards either way. It reports whether the call was started.
+func startExtend(ctx context.Context, xt *toggler, a *actionState,
+	extend func(context.Context, time.Duration) (bool, error), step time.Duration, done func()) bool {
+	return xt.start(ctx, func(xctx context.Context) {
+		a.run(xctx, func(c context.Context) error {
+			_, err := extend(c, step)
+			return err
+		}, done)
+	})
 }
 
 // toggler runs at most one toggle at a time, detached from cancellation.
@@ -130,7 +202,7 @@ func spawnIfDeadline(status func() (core.State, error), spawn func() error) erro
 	return nil
 }
 
-// actionTimeout bounds one About or website action.
+// actionTimeout bounds one About action.
 const actionTimeout = 10 * time.Second
 
 // Config holds what the tray needs.
@@ -141,7 +213,9 @@ type Config struct {
 	Spawn    func() error
 	About    about.Info
 	Notifier system.Notifier
-	Opener   system.Opener
+	// Opener opens URLs; the tray menu does not use it (the About window
+	// will). nil is harmless.
+	Opener system.Opener
 	// ScreenSaver reports screensaver activation; nil disables the
 	// "continue presenting?" prompt entirely.
 	ScreenSaver system.ScreenSaver
@@ -165,15 +239,6 @@ func aboutAction(n system.Notifier, info about.Info) func(context.Context) error
 	}
 }
 
-func websiteAction(o system.Opener, info about.Info) func(context.Context) error {
-	return func(ctx context.Context) error {
-		if o == nil {
-			return errors.New("website: no opener configured")
-		}
-		return o.Open(ctx, info.Website)
-	}
-}
-
 // joinErrText joins two non-empty error texts with "; ".
 func joinErrText(a, b string) string {
 	switch {
@@ -185,7 +250,7 @@ func joinErrText(a, b string) string {
 	return a + "; " + b
 }
 
-// actionState holds the last About or website error for the tooltip.
+// actionState holds the last About error for the tooltip.
 type actionState struct {
 	mu  sync.Mutex
 	err string
@@ -221,15 +286,20 @@ func Run(ctx context.Context, cfg Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var tg toggler
+	var tg, xt toggler // toggle and Extend: at most one of each at a time
 	// redraw asks the menu loop to refresh; coalesced, never blocks.
 	redraw := make(chan struct{}, 1)
+	// toggleReq carries left clicks on the icon and checkbox clicks to the
+	// one toggle handler; coalesced, never blocks the D-Bus goroutine.
+	toggleReq := make(chan struct{}, 1)
 	e := cfg.Engine
+	step := continueStep(cfg.Timeout)
 	coord := newPromptCoordinator(promptDeps{
 		prompter: cfg.Prompter,
 		info:     cfg.About,
+		step:     step,
 		status:   e.Status,
-		extend:   func(ctx context.Context) (bool, error) { return e.Extend(ctx, continueStep(cfg.Timeout)) },
+		extend:   func(ctx context.Context) (bool, error) { return e.Extend(ctx, step) },
 		disable:  e.Disable,
 		now:      time.Now,
 		changed: func() {
@@ -246,35 +316,56 @@ func Run(ctx context.Context, cfg Config) error {
 			fmt.Fprintln(os.Stderr, err) // once; the tray carries on without the prompt
 		}
 	}()
-	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, coord, redraw) }, cancel)
+	// Set before systray.Run: the library reads it when it exports the item
+	// (ItemIsMenu), and the host then sends left clicks as Activate. A host
+	// that never calls Activate still opens the menu.
+	systray.SetOnTapped(func() { requestToggle(toggleReq) })
+	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, coord, redraw, toggleReq) }, cancel)
 	cancel()
 	<-watchDone
 	coord.wait()
 	tg.wait()
+	xt.wait()
 	return nil
 }
 
-func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg *toggler, coord *promptCoordinator, redraw <-chan struct{}) {
+// requestToggle queues one toggle request without blocking; a request that
+// arrives while one is queued is merged into it.
+func requestToggle(req chan<- struct{}) {
+	select {
+	case req <- struct{}{}:
+	default:
+	}
+}
+
+func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt *toggler,
+	coord *promptCoordinator, redraw <-chan struct{}, toggleReq chan struct{}) {
 	e, timeout, spawn := cfg.Engine, cfg.Timeout, cfg.Spawn
+	step := continueStep(timeout)
 	systray.SetIcon(Icon(false))
 	systray.SetTitle("prezilla")
-	timerItem := systray.AddMenuItem("", "When presentation mode ends")
+
+	// Items cannot be reordered after creation: create them in menu order,
+	// hide the conditional ones, and let refresh show them.
+	m := menuState(false, "", false, step)
+	keepItem := systray.AddMenuItem(m.Keep.Title, m.Keep.Tooltip)
+	keepItem.Hide()
+	stopItem := systray.AddMenuItem(m.Stop.Title, m.Stop.Tooltip)
+	stopItem.Hide()
+	modeItem := systray.AddMenuItemCheckbox(modeTitle, modeTooltip, false)
+	timerItem := systray.AddMenuItem("", m.Timer.Tooltip)
 	timerItem.Disable()
 	timerItem.Hide()
-	toggle := systray.AddMenuItem("", "")
-	continueItem := systray.AddMenuItem("Continue presentation", "Keep presentation mode on for another full timeout")
-	continueItem.Hide()
-	endItem := systray.AddMenuItem("End presentation", "Turn presentation mode off now")
-	endItem.Hide()
+	extendItem := systray.AddMenuItem(m.Extend.Title, m.Extend.Tooltip)
+	extendItem.Hide()
 	systray.AddSeparator()
-	aboutItem := systray.AddMenuItem("About prezilla", "Show version and license")
-	siteItem := systray.AddMenuItem("Project website", "Open the project website")
+	aboutItem := systray.AddMenuItem("About prezilla", "Shows the version, license and website.")
 	systray.AddSeparator()
-	quit := systray.AddMenuItem("Quit", "Quit prezilla")
+	quit := systray.AddMenuItem("Quit", "Closes the tray icon; presentation mode stays as it is.")
 
 	var mu sync.Mutex // guards lastErr, lastExpiryErr and the visibility flags
 	var lastErr error
-	var actions actionState
+	var actions, extendErr actionState
 	var lastExpiryErr string
 	var timerShown, promptShown bool
 
@@ -303,7 +394,6 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg *tog
 		now := time.Now()
 		coord.check(st, now)
 		prompting := coord.pending()
-		title, _ := Labels(st.Active)
 		var toggleText string
 		if lastErr != nil {
 			toggleText = lastErr.Error()
@@ -313,25 +403,51 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg *tog
 			remaining = remainingText(now, st.ExpiresAt)
 			timer = timerLabel(now, st.ExpiresAt.Local())
 		}
-		tip := tooltip(st.Active, remaining,
-			joinErrText(joinErrText(toggleText, actions.text()), coord.errText()), expText, prompting)
-		if timer != "" {
-			timerItem.SetTitle(timer)
+		errText := joinErrText(joinErrText(toggleText, actions.text()), joinErrText(extendErr.text(), coord.errText()))
+		tip := tooltip(st.Active, remaining, errText, expText, prompting)
+		m := menuState(st.Active, timer, prompting, step)
+		if m.Timer.Visible {
+			timerItem.SetTitle(m.Timer.Title)
 		}
-		if show := timer != ""; show != timerShown {
-			timerShown = show
-			setVisible(timerItem, show)
+		if m.Timer.Visible != timerShown {
+			timerShown = m.Timer.Visible
+			setVisible(timerItem, timerShown)
+			setVisible(extendItem, m.Extend.Visible)
 		}
-		if prompting != promptShown {
-			promptShown = prompting
-			setVisible(continueItem, prompting)
-			setVisible(endItem, prompting)
+		if m.Keep.Visible != promptShown {
+			promptShown = m.Keep.Visible
+			setVisible(keepItem, promptShown)
+			setVisible(stopItem, m.Stop.Visible)
+		}
+		// The engine state is the only source of the checkmark: set it on
+		// every refresh, so a failed toggle, a host that ticked the box
+		// itself or a change from the CLI never leaves it wrong.
+		if m.Mode.Checked {
+			modeItem.Check()
+		} else {
+			modeItem.Uncheck()
 		}
 		systray.SetIcon(Icon(st.Active))
-		toggle.SetTitle(title)
 		systray.SetTooltip(tip)
 	}
 	refresh()
+
+	// toggle is the one handler for the checkbox and the icon's left click.
+	toggle := func() {
+		tg.start(ctx, func(tctx context.Context) {
+			_, err := e.Toggle(tctx, timeout)
+			if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
+				err = errors.Join(err, serr)
+			}
+			mu.Lock()
+			lastErr = err
+			mu.Unlock()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			refresh()
+		})
+	}
 
 	go func() {
 		t := time.NewTicker(pollEvery)
@@ -345,28 +461,18 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg *tog
 				refresh()
 			case <-redraw:
 				refresh()
-			case <-continueItem.ClickedCh:
+			case <-keepItem.ClickedCh:
 				coord.menuAnswer(ctx, keyContinue)
-			case <-endItem.ClickedCh:
+			case <-stopItem.ClickedCh:
 				coord.menuAnswer(ctx, keyEnd)
-			case <-toggle.ClickedCh:
-				tg.start(ctx, func(tctx context.Context) {
-					_, err := e.Toggle(tctx, timeout)
-					if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
-						err = errors.Join(err, serr)
-					}
-					mu.Lock()
-					lastErr = err
-					mu.Unlock()
-					if err != nil {
-						fmt.Fprintln(os.Stderr, err)
-					}
-					refresh()
-				})
+			case <-modeItem.ClickedCh:
+				requestToggle(toggleReq)
+			case <-toggleReq:
+				toggle()
+			case <-extendItem.ClickedCh:
+				startExtend(ctx, xt, &extendErr, e.Extend, step, refresh)
 			case <-aboutItem.ClickedCh:
 				go runAction(ctx, &actions, aboutAction(cfg.Notifier, cfg.About), refresh)
-			case <-siteItem.ClickedCh:
-				go runAction(ctx, &actions, websiteAction(cfg.Opener, cfg.About), refresh)
 			case <-quit.ClickedCh:
 				cancel()
 			}

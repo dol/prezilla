@@ -49,9 +49,9 @@ func TestTimerLabelTable(t *testing.T) {
 		{"zero", time.Time{}, ""},
 		{"past", now.Add(-time.Minute), ""},
 		{"now", now, ""},
-		{"12 min", now.Add(12 * time.Minute), "Ends 12:12 · 12 min left"},
-		{"under a minute", now.Add(20 * time.Second), "Ends 12:00 · 1 min left"},
-		{"local zone formatting", time.Date(2026, 1, 1, 9, 45, 0, 0, time.UTC), "Ends 09:45 · 45 min left"},
+		{"12 min", now.Add(12 * time.Minute), "Ends 12:12 · 12\u00a0min left"},
+		{"under a minute", now.Add(20 * time.Second), "Ends 12:00 · 1\u00a0min left"},
+		{"local zone formatting", time.Date(2026, 1, 1, 9, 45, 0, 0, time.UTC), "Ends 09:45 · 45\u00a0min left"},
 	}
 	for _, c := range cases {
 		if got := timerLabel(now, c.expires); got != c.want {
@@ -59,22 +59,42 @@ func TestTimerLabelTable(t *testing.T) {
 		}
 	}
 	// The label uses the deadline's own zone: callers pass it in local time.
-	if got := timerLabel(now, time.Date(2026, 1, 1, 14, 5, 0, 0, zone)); got != "Ends 14:05 · 125 min left" {
+	if got := timerLabel(now, time.Date(2026, 1, 1, 14, 5, 0, 0, zone)); got != "Ends 14:05 · 125\u00a0min left" {
 		t.Errorf("fixed zone: %q", got)
 	}
 }
 
 func TestPromptRequestStrings(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	p := promptRequest(about.New("1"), core.State{Active: true, ExpiresAt: now.Add(11*time.Minute + time.Second)}, now)
+	st := core.State{Active: true, ExpiresAt: now.Add(11*time.Minute + time.Second)}
+	p := promptRequest(about.New("1"), st, now, continueStep(0))
 	want := system.Prompt{
-		Summary:  "Presentation still running",
-		Body:     "Screensaver started with 12 min left. Continue presenting?",
+		Summary:  "Keep presenting?",
+		Body:     "The screensaver started with 12\u00a0min left.",
 		IconName: "prezilla",
-		Actions:  []system.PromptAction{{Key: "continue", Label: "Continue presenting"}, {Key: "end", Label: "End presentation"}},
+		Actions: []system.PromptAction{
+			{Key: "continue", Label: "Keep presenting (+30 min)"},
+			{Key: "end", Label: "Stop presenting"},
+		},
 	}
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("got %+v\nwant %+v", p, want)
+	}
+	if got := promptRequest(about.New("1"), st, now, 45*time.Minute).Actions[0].Label; got != "Keep presenting (+45 min)" {
+		t.Errorf("45 min step: %q", got)
+	}
+	if promptLine != "Screensaver started. Keep presenting?" {
+		t.Errorf("promptLine %q", promptLine)
+	}
+}
+
+// The prompt actions and the fallback menu items use the same words.
+func TestPromptActionsMatchMenuItems(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	p := promptRequest(about.New("1"), core.State{Active: true, ExpiresAt: now.Add(time.Hour)}, now, testTimeout)
+	m := menuState(true, "x", true, testTimeout)
+	if p.Actions[0].Label != m.Keep.Title || p.Actions[1].Label != m.Stop.Title {
+		t.Errorf("actions %q/%q, menu %q/%q", p.Actions[0].Label, p.Actions[1].Label, m.Keep.Title, m.Stop.Title)
 	}
 }
 
@@ -183,6 +203,7 @@ func newFixture(t *testing.T, p *system.FakePrompter) *coordFixture {
 			}
 			return eng.opErr
 		},
+		step:    testTimeout,
 		now:     func() time.Time { return now },
 		changed: func() { f.changed <- struct{}{} },
 	})
@@ -228,7 +249,7 @@ func TestCoordinatorOnePromptPerActivation(t *testing.T) {
 	if n := len(p.Prompts()); n != 1 || !f.c.pending() {
 		t.Fatalf("prompts %d pending %v", n, f.c.pending())
 	}
-	if got := p.Prompts()[0].Summary; got != "Presentation still running" {
+	if got := p.Prompts()[0].Summary; got != "Keep presenting?" {
 		t.Errorf("summary %q", got)
 	}
 	p.Answer <- ""

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,13 +17,11 @@ import (
 )
 
 func TestLabelsActiveAndInactive(t *testing.T) {
-	title, tip := Labels(true)
-	if title != "Presenting" || tip != "prezilla: presentation mode on" {
-		t.Errorf("active: %q, %q", title, tip)
+	if tip := Labels(true); tip != "prezilla: presentation mode on" {
+		t.Errorf("active: %q", tip)
 	}
-	title, tip = Labels(false)
-	if title != "Not presenting" || tip != "prezilla: presentation mode off" {
-		t.Errorf("inactive: %q, %q", title, tip)
+	if tip := Labels(false); tip != "prezilla: presentation mode off" {
+		t.Errorf("inactive: %q", tip)
 	}
 }
 
@@ -46,10 +46,10 @@ func TestRemainingText(t *testing.T) {
 		{time.Time{}, ""},
 		{now.Add(-time.Minute), ""},
 		{now, ""},
-		{now.Add(30 * time.Second), "1 min left"},
-		{now.Add(time.Minute), "1 min left"},
-		{now.Add(90 * time.Second), "2 min left"},
-		{now.Add(3 * time.Minute), "3 min left"},
+		{now.Add(30 * time.Second), "1\u00a0min left"},
+		{now.Add(time.Minute), "1\u00a0min left"},
+		{now.Add(90 * time.Second), "2\u00a0min left"},
+		{now.Add(3 * time.Minute), "3\u00a0min left"},
 	}
 	for _, c := range cases {
 		if got := remainingText(now, c.expires); got != c.want {
@@ -74,8 +74,8 @@ func TestTooltip(t *testing.T) {
 		{true, "1 min left", "boom", "", false, "prezilla: presentation mode on, 1 min left (error: boom)"},
 		{true, "", "", "expired", false, "prezilla: presentation mode on (error: expired)"},
 		{true, "", "boom", "expired", false, "prezilla: presentation mode on (error: boom; expired)"},
-		{true, "3 min left", "", "", true, "prezilla: presentation mode on, 3 min left\nScreensaver started: continue presenting?"},
-		{true, "3 min left", "boom", "", true, "prezilla: presentation mode on, 3 min left (error: boom)\nScreensaver started: continue presenting?"},
+		{true, "3 min left", "", "", true, "prezilla: presentation mode on, 3 min left\nScreensaver started. Keep presenting?"},
+		{true, "3 min left", "boom", "", true, "prezilla: presentation mode on, 3 min left (error: boom)\nScreensaver started. Keep presenting?"},
 	}
 	for _, c := range cases {
 		if got := tooltip(c.active, c.remaining, c.toggleErr, c.expiryErr, c.prompting); got != c.want {
@@ -165,22 +165,17 @@ func TestAboutMessage(t *testing.T) {
 	}
 }
 
-func TestAboutAndWebsiteActions(t *testing.T) {
+func TestAboutAction(t *testing.T) {
 	info := about.New("1.2.3")
 	n := &system.FakeNotifier{}
-	o := &system.FakeOpener{}
 	var a actionState
 	refreshed := 0
 	done := func() { refreshed++ }
 	a.run(context.Background(), aboutAction(n, info), done)
-	a.run(context.Background(), websiteAction(o, info), done)
 	if len(n.Calls) != 1 || n.Calls[0].Summary != "prezilla 1.2.3" || n.Calls[0].Icon != "prezilla" {
 		t.Errorf("notify calls %v", n.Calls)
 	}
-	if len(o.Calls) != 1 || o.Calls[0] != about.Website {
-		t.Errorf("open calls %v", o.Calls)
-	}
-	if a.text() != "" || refreshed != 2 {
+	if a.text() != "" || refreshed != 1 {
 		t.Errorf("text %q refreshed %d", a.text(), refreshed)
 	}
 
@@ -192,7 +187,8 @@ func TestAboutAndWebsiteActions(t *testing.T) {
 	if tip := tooltip(false, "", a.text(), "", false); tip != "prezilla: presentation mode off (error: no bus)" {
 		t.Errorf("tooltip %q", tip)
 	}
-	a.run(context.Background(), websiteAction(o, info), done)
+	n.Err = nil
+	a.run(context.Background(), aboutAction(n, info), done)
 	if a.text() != "" {
 		t.Errorf("success should clear, got %q", a.text())
 	}
@@ -214,7 +210,6 @@ func TestNilDependenciesYieldErrors(t *testing.T) {
 		want string
 	}{
 		{aboutAction(nil, info), "about: no notifier configured"},
-		{websiteAction(nil, info), "website: no opener configured"},
 	}
 	for _, c := range cases {
 		var a actionState
@@ -226,4 +221,198 @@ func TestNilDependenciesYieldErrors(t *testing.T) {
 			t.Errorf("tooltip %q", tip)
 		}
 	}
+}
+
+// visibleTitles lists the titles of the visible conditional items and the
+// checkbox in menu order.
+func visibleTitles(m menuModel) []string {
+	var out []string
+	for _, it := range m.ordered() {
+		if it.Visible {
+			out = append(out, it.Title)
+		}
+	}
+	return out
+}
+
+func TestMenuStateTable(t *testing.T) {
+	const timer = "Ends 12:12 · 12 min left"
+	cases := []struct {
+		name        string
+		active      bool
+		timer       string
+		pending     bool
+		step        time.Duration
+		wantVisible []string
+		wantChecked bool
+	}{
+		{"inactive", false, "", false, testTimeout, []string{"Presentation mode"}, false},
+		{"active without deadline", true, "", false, testTimeout, []string{"Presentation mode"}, true},
+		{"active with deadline", true, timer, false, testTimeout,
+			[]string{"Presentation mode", timer, "Extend by 30 min"}, true},
+		{"pending question", true, timer, true, testTimeout,
+			[]string{"Keep presenting (+30 min)", "Stop presenting", "Presentation mode", timer, "Extend by 30 min"}, true},
+		{"step 45", true, timer, true, 45 * time.Minute,
+			[]string{"Keep presenting (+45 min)", "Stop presenting", "Presentation mode", timer, "Extend by 45 min"}, true},
+	}
+	for _, c := range cases {
+		m := menuState(c.active, c.timer, c.pending, c.step)
+		if got := visibleTitles(m); !reflect.DeepEqual(got, c.wantVisible) {
+			t.Errorf("%s: visible %q want %q", c.name, got, c.wantVisible)
+		}
+		if m.Mode.Checked != c.wantChecked {
+			t.Errorf("%s: checked %v want %v", c.name, m.Mode.Checked, c.wantChecked)
+		}
+		if m.Mode.Title != "Presentation mode" || !m.Mode.Visible || !m.Mode.Enabled {
+			t.Errorf("%s: checkbox %+v", c.name, m.Mode)
+		}
+		if m.Timer.Enabled {
+			t.Errorf("%s: timer line enabled", c.name)
+		}
+		for _, it := range []itemState{m.Keep, m.Stop, m.Extend} {
+			if it.Visible && !it.Enabled {
+				t.Errorf("%s: %q visible but disabled", c.name, it.Title)
+			}
+		}
+		for _, it := range []itemState{m.Keep, m.Stop, m.Mode, m.Extend} {
+			if it.Checked && it.Title != "Presentation mode" {
+				t.Errorf("%s: %q checked", c.name, it.Title)
+			}
+		}
+	}
+}
+
+func TestMenuStateCheckboxTitleNeverChanges(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		for _, timer := range []string{"", "Ends 12:12 · 12 min left"} {
+			for _, pending := range []bool{false, true} {
+				if got := menuState(active, timer, pending, testTimeout).Mode.Title; got != modeTitle {
+					t.Errorf("active %v timer %q pending %v: title %q", active, timer, pending, got)
+				}
+			}
+		}
+	}
+	if modeTitle != "Presentation mode" || modeTooltip != "Turn presentation mode on or off" {
+		t.Errorf("checkbox %q / %q", modeTitle, modeTooltip)
+	}
+}
+
+func TestMenuStateTitlesFromStep(t *testing.T) {
+	for _, c := range []struct {
+		cfg              time.Duration
+		keep, extend, ks string
+	}{
+		{0, "Keep presenting (+30 min)", "Extend by 30 min", "Keeps presentation mode on until 30 minutes from now."},
+		{45 * time.Minute, "Keep presenting (+45 min)", "Extend by 45 min", "Keeps presentation mode on until 45 minutes from now."},
+	} {
+		m := menuState(true, "x", true, continueStep(c.cfg))
+		if m.Keep.Title != c.keep || m.Extend.Title != c.extend || m.Keep.Tooltip != c.ks {
+			t.Errorf("cfg %v: keep %q extend %q tip %q", c.cfg, m.Keep.Title, m.Extend.Title, m.Keep.Tooltip)
+		}
+		if m.Stop.Title != "Stop presenting" {
+			t.Errorf("stop %q", m.Stop.Title)
+		}
+		for _, it := range m.ordered() {
+			if it.Tooltip == "" || !strings.HasSuffix(it.Tooltip, ".") && it.Title != modeTitle {
+				t.Errorf("%q tooltip %q", it.Title, it.Tooltip)
+			}
+		}
+	}
+}
+
+func TestStepMinutes(t *testing.T) {
+	for _, c := range []struct {
+		d    time.Duration
+		want int
+	}{{30 * time.Minute, 30}, {45 * time.Minute, 45}, {2 * time.Hour, 120}} {
+		if got := stepMinutes(c.d); got != c.want {
+			t.Errorf("stepMinutes(%v) = %d want %d", c.d, got, c.want)
+		}
+	}
+}
+
+func TestStartExtend(t *testing.T) {
+	type call struct {
+		ctx  context.Context
+		step time.Duration
+	}
+	cases := []struct {
+		name    string
+		ok      bool
+		err     error
+		wantErr string
+	}{
+		{"extended", true, nil, ""},
+		{"session ended: no-op", false, nil, ""},
+		{"error", false, errors.New("state: locked"), "state: locked"},
+	}
+	for _, c := range cases {
+		var xt toggler
+		var a actionState
+		calls := make(chan call, 4)
+		done := make(chan struct{}, 4)
+		parent, cancel := context.WithCancel(context.Background())
+		extend := func(ctx context.Context, step time.Duration) (bool, error) {
+			calls <- call{ctx, step}
+			return c.ok, c.err
+		}
+		if !startExtend(parent, &xt, &a, extend, 45*time.Minute, func() { done <- struct{}{} }) {
+			t.Fatalf("%s: not started", c.name)
+		}
+		got := <-calls
+		cancel()
+		<-done
+		xt.wait()
+		if got.step != 45*time.Minute {
+			t.Errorf("%s: step %v", c.name, got.step)
+		}
+		if dl, ok := got.ctx.Deadline(); !ok || time.Until(dl) > core.OperationTimeout {
+			t.Errorf("%s: ctx deadline %v %v", c.name, dl, ok)
+		}
+		if a.text() != c.wantErr {
+			t.Errorf("%s: err text %q want %q", c.name, a.text(), c.wantErr)
+		}
+		if c.wantErr != "" {
+			if tip := tooltip(true, "", a.text(), "", false); !strings.Contains(tip, "(error: "+c.wantErr+")") {
+				t.Errorf("%s: tooltip %q", c.name, tip)
+			}
+		}
+	}
+}
+
+func TestStartExtendIgnoresOverlappingClicks(t *testing.T) {
+	var xt toggler
+	var a actionState
+	release := make(chan struct{})
+	n := 0
+	var mu sync.Mutex
+	extend := func(ctx context.Context, _ time.Duration) (bool, error) {
+		mu.Lock()
+		n++
+		mu.Unlock()
+		<-release
+		if ctx.Err() != nil {
+			t.Errorf("extend ctx cancelled: %v", ctx.Err())
+		}
+		return true, nil
+	}
+	parent, cancel := context.WithCancel(context.Background())
+	if !startExtend(parent, &xt, &a, extend, testTimeout, func() {}) {
+		t.Fatal("first click refused")
+	}
+	if startExtend(parent, &xt, &a, extend, testTimeout, func() {}) {
+		t.Error("overlapping click accepted")
+	}
+	cancel() // Quit must not cut the running call
+	close(release)
+	xt.wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if n != 1 {
+		t.Errorf("extend ran %d times", n)
+	}
+	if !startExtend(context.Background(), &xt, &a, func(context.Context, time.Duration) (bool, error) { return true, nil }, testTimeout, func() {}) {
+		t.Error("click after completion refused")
+	}
+	xt.wait()
 }

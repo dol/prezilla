@@ -17,7 +17,9 @@ const (
 	keyContinue = "continue"
 	keyEnd      = "end"
 	// promptLine is the tooltip line shown while a prompt is pending.
-	promptLine = "Screensaver started: continue presenting?"
+	promptLine = "Screensaver started. Keep presenting?"
+	// stopTitle answers the question by turning the mode off.
+	stopTitle = "Stop presenting"
 )
 
 // shouldPrompt reports whether a screensaver change to active should ask
@@ -36,15 +38,27 @@ func timerLabel(now, expires time.Time) string {
 	return "Ends " + expires.Format("15:04") + " · " + rem
 }
 
-// promptRequest builds the "continue?" question for st.
-func promptRequest(info about.Info, st core.State, now time.Time) system.Prompt {
+// keepTitle answers the question by extending the session by step; the
+// notification action and the menu item share it.
+func keepTitle(step time.Duration) string {
+	return fmt.Sprintf("Keep presenting (+%d min)", stepMinutes(step))
+}
+
+// stepMinutes is step in whole minutes, rounded to the nearest minute.
+func stepMinutes(step time.Duration) int {
+	return int((step + time.Minute/2) / time.Minute)
+}
+
+// promptRequest builds the "keep presenting?" question for st; step is how
+// far keeping moves the deadline.
+func promptRequest(info about.Info, st core.State, now time.Time, step time.Duration) system.Prompt {
 	return system.Prompt{
-		Summary:  "Presentation still running",
-		Body:     "Screensaver started with " + remainingText(now, st.ExpiresAt) + ". Continue presenting?",
+		Summary:  "Keep presenting?",
+		Body:     "The screensaver started with " + remainingText(now, st.ExpiresAt) + ".",
 		IconName: info.IconName,
 		Actions: []system.PromptAction{
-			{Key: keyContinue, Label: "Continue presenting"},
-			{Key: keyEnd, Label: "End presentation"},
+			{Key: keyContinue, Label: keepTitle(step)},
+			{Key: keyEnd, Label: stopTitle},
 		},
 	}
 }
@@ -64,7 +78,9 @@ type promptDeps struct {
 	// prompter shows the notification; nil leaves only the menu items.
 	prompter system.Prompter
 	info     about.Info
-	status   func() (core.State, error)
+	// step is how far "keep presenting" moves the deadline (label only).
+	step   time.Duration
+	status func() (core.State, error)
 	// extend moves the deadline of a live session (never shortens or clears
 	// it) and reports false, changing nothing, once the session has ended.
 	extend  func(ctx context.Context) (bool, error)
@@ -155,7 +171,7 @@ func (c *promptCoordinator) screensaver(ctx context.Context, active bool) {
 	if p == nil {
 		return
 	}
-	req := promptRequest(c.d.info, st, c.d.now())
+	req := promptRequest(c.d.info, st, c.d.now(), c.d.step)
 	go func() {
 		defer c.wg.Done()
 		key, err := p.Ask(pctx, req)
