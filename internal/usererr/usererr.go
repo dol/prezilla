@@ -111,7 +111,7 @@ var rules = []rule{
 	}},
 	{"notification server has no actions", func(_ error, text string) (string, bool) {
 		if strings.HasPrefix(text, "notify: server does not support actions") {
-			return "Your notification server can't show buttons. Use Keep presenting and Stop presenting in the tray menu.", true
+			return `Your notification server can't show buttons. Use "Keep presenting" or "Stop presenting" in the tray menu.`, true
 		}
 		return "", false
 	}},

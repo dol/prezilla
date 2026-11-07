@@ -58,7 +58,7 @@ func cases() []struct {
 		{"start watcher", fmt.Errorf("start watcher: %w", errors.New("fork/exec: resource temporarily unavailable")),
 			`Couldn't start the background timer, so presentation mode might not end by itself. Run "prezilla off" when you are done.`},
 		{"notify no actions", errors.New("notify: server does not support actions"),
-			`Your notification server can't show buttons. Use Keep presenting and Stop presenting in the tray menu.`},
+			`Your notification server can't show buttons. Use "Keep presenting" or "Stop presenting" in the tray menu.`},
 		{"mute pulse", pulse, sMute},
 		{"minimize x11", x11, sMinimize},
 		{"icons xfconf missing", fmt.Errorf("icons: %w", xfconfMissing()),
