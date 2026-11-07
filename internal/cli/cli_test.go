@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -175,12 +173,12 @@ func TestRunEngineErrorExits1AndPrintsToStderr(t *testing.T) {
 
 func TestRunMappedEngineErrorPrintsExplainedText(t *testing.T) {
 	h := newHarness(t)
-	h.sw.err = fmt.Errorf("xfconf-query: %w", exec.ErrNotFound)
+	h.sw.err = errors.New("xfconf: connect: dial unix /run/user/1000/bus: no such file")
 	if c := h.run("on"); c != 1 {
 		t.Errorf("code %d", c)
 	}
-	want := "Couldn't change desktop icons: xfconf-query was not found. Prezilla needs an XFCE session." +
-		" (details: icons: xfconf-query: " + exec.ErrNotFound.Error() + ")\n"
+	want := `Couldn't change desktop icons: XFCE's settings service (xfconfd) isn't reachable. Run Prezilla inside an XFCE session, or remove "icons" from "switches" in config.json.` +
+		" (details: icons: xfconf: connect: dial unix /run/user/1000/bus: no such file)\n"
 	if got := h.errOut.String(); got != want {
 		t.Errorf("stderr %q\nwant %q", got, want)
 	}

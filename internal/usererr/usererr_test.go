@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/godbus/dbus/v5"
 )
 
 const (
@@ -18,9 +19,19 @@ const (
 	sWall        = `Couldn't change the wallpaper: no image is set. Set "wallpaper" to an image path in config.json, or remove "wallpaper" from "switches".`
 )
 
-func xfconfMissing() error {
-	// What ExecRunner builds for a missing binary.
-	return fmt.Errorf("xfconf-query: %w", &exec.Error{Name: "xfconf-query", Err: exec.ErrNotFound})
+// xfconfDown is what DBusXfconf returns when there is no session bus.
+func xfconfDown() error {
+	return errors.New("xfconf: connect: dial unix /run/user/1000/bus: connect: no such file or directory")
+}
+
+// xfconfNoService is a bus without xfconfd and nothing to start it.
+func xfconfNoService() error {
+	return fmt.Errorf("xfconf: get xfce4-desktop /desktop-icons/style: %w",
+		dbus.Error{Name: "org.freedesktop.DBus.Error.ServiceUnknown", Body: []any{"The name org.xfce.Xfconf was not provided by any .service files"}})
+}
+
+func xfconfSlow() error {
+	return fmt.Errorf("xfconf: set xfce4-notifyd /do-not-disturb: timed out after 10s: %w", context.DeadlineExceeded)
 }
 
 func cases() []struct {
@@ -61,12 +72,24 @@ func cases() []struct {
 			`Your notification server can't show buttons. Use "Keep presenting" or "Stop presenting" in the tray menu.`},
 		{"mute pulse", pulse, sMute},
 		{"minimize x11", x11, sMinimize},
-		{"icons xfconf missing", fmt.Errorf("icons: %w", xfconfMissing()),
-			"Couldn't change desktop icons: xfconf-query was not found. Prezilla needs an XFCE session."},
-		{"notifications xfconf missing", fmt.Errorf("notifications: %w", xfconfMissing()),
-			"Couldn't change notifications: xfconf-query was not found. Prezilla needs an XFCE session."},
-		{"wallpaper xfconf missing (text only)", errors.New(`wallpaper: xfconf-query -l: xfconf-query: exec: "xfconf-query": executable file not found in $PATH`),
-			"Couldn't change the wallpaper: xfconf-query was not found. Prezilla needs an XFCE session."},
+		{"icons settings service down", fmt.Errorf("icons: %w", fmt.Errorf("read icon style: %w", xfconfDown())),
+			`Couldn't change desktop icons: XFCE's settings service (xfconfd) isn't reachable. Run Prezilla inside an XFCE session, or remove "icons" from "switches" in config.json.`},
+		{"notifications no service", fmt.Errorf("notifications: %w", fmt.Errorf("read do-not-disturb: %w", xfconfNoService())),
+			`Couldn't change notifications: XFCE's settings service (xfconfd) isn't reachable. Run Prezilla inside an XFCE session, or remove "notifications" from "switches" in config.json.`},
+		{"wallpaper settings service down", fmt.Errorf("wallpaper: %w", fmt.Errorf("list wallpapers: %w", xfconfDown())),
+			`Couldn't change the wallpaper: XFCE's settings service (xfconfd) isn't reachable. Run Prezilla inside an XFCE session, or remove "wallpaper" from "switches" in config.json.`},
+		{"presentation settings service down", fmt.Errorf("presentation: %w", fmt.Errorf("read presentation mode: %w", xfconfDown())),
+			`Couldn't change the power manager's presentation mode: XFCE's settings service (xfconfd) isn't reachable. Run Prezilla inside an XFCE session, or remove "presentation" from "switches" in config.json.`},
+		{"notifications settings service timeout", fmt.Errorf("notifications: %w", fmt.Errorf("set do-not-disturb: %w", xfconfSlow())),
+			`Couldn't change notifications: XFCE's settings service (xfconfd) didn't answer in time. Run "prezilla off", then try again.`},
+		{"icons restore settings service down", fmt.Errorf("icons: %w", fmt.Errorf("restore icon style: %w", xfconfDown())),
+			`Couldn't restore desktop icons: XFCE's settings service (xfconfd) isn't reachable. Log in to your XFCE session again, then run "prezilla off" again.`},
+		{"wallpaper restore settings service down", fmt.Errorf("wallpaper: %w", fmt.Errorf("restore /backdrop/screen0/monitor0/workspace0/last-image: %w", xfconfNoService())),
+			`Couldn't restore the wallpaper: XFCE's settings service (xfconfd) isn't reachable. Log in to your XFCE session again, then run "prezilla off" again.`},
+		{"presentation restore timeout", fmt.Errorf("presentation: %w", fmt.Errorf("restore presentation mode: %w", xfconfSlow())),
+			`Couldn't restore the power manager's presentation mode: XFCE's settings service (xfconfd) didn't answer in time. Run "prezilla off" again.`},
+		{"presentation unexpected value", errors.New("presentation: read presentation mode: unexpected value \"yes\""),
+			`Couldn't change the power manager's presentation mode: its setting isn't a yes/no value. Reset it in the power manager's settings, or remove "presentation" from "switches" in config.json.`},
 		{"wallpaper no image", errors.New(`wallpaper: wallpaper: no image configured (set "wallpaper" in config)`), sWall},
 		{"lock", lock, sLock},
 		{"parse state", errors.New("parse state /home/u/.local/state/prezilla/state.json: invalid character 'x' looking for beginning of value"),
@@ -92,9 +115,9 @@ func TestShortAndExplainPerRule(t *testing.T) {
 	}
 }
 
-func TestRealXfconfMissingMatchesByErrorsIs(t *testing.T) {
-	err := fmt.Errorf("icons: %w", fmt.Errorf("xfconf-query: %w", exec.ErrNotFound))
-	if !strings.HasPrefix(Short(err), "Couldn't change desktop icons: xfconf-query was not found.") {
+func TestServiceUnknownIsMatchedByBusErrorName(t *testing.T) {
+	err := fmt.Errorf("icons: %w", fmt.Errorf("hide icons: %w", xfconfNoService()))
+	if !strings.HasPrefix(Short(err), "Couldn't change desktop icons: XFCE's settings service (xfconfd) isn't reachable.") {
 		t.Errorf("Short = %q", Short(err))
 	}
 }
@@ -105,7 +128,8 @@ func TestUnmappedPassesThrough(t *testing.T) {
 		errors.New(`no system tray (StatusNotifier host) found; use "prezilla toggle" from the command line`),
 		fmt.Errorf("mute: %w", errors.New("pulse: set sink mute: denied")), // not a connect failure
 		fmt.Errorf("minimize: %w", errors.New("x11: timed out after 5s: "+context.DeadlineExceeded.Error())),
-		fmt.Errorf("mute: %w", xfconfMissing()), // cause the table does not list for mute
+		fmt.Errorf("mute: %w", xfconfDown()), // switch the Xfconf rows do not cover
+		fmt.Errorf("icons: %w", fmt.Errorf("restore icon style: %w", errors.New("xfconf: set a b: permission denied"))),
 		errors.New("no wallpaper properties found"),
 		fmt.Errorf("minimize: %w", fmt.Errorf("restore desktop: %w", fmt.Errorf("x11: %w", context.Canceled))),
 		fmt.Errorf("mute: %w", fmt.Errorf("mute sink: %w", errors.New("pulse: set sink mute: timed out"))),

@@ -9,9 +9,10 @@ package usererr
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/godbus/dbus/v5"
 )
 
 // rule is one row of the matcher table. match inspects one (non-joined)
@@ -28,6 +29,7 @@ const (
 	idWallpaper     = "wallpaper"
 	idMute          = "mute"
 	idMinimize      = "minimize"
+	idPresentation  = "presentation"
 )
 
 // nouns names what a switch changes, for the sentences.
@@ -37,6 +39,7 @@ var nouns = map[string]string{
 	idWallpaper:     "the wallpaper",
 	idMute:          "the sound",
 	idMinimize:      "the desktop",
+	idPresentation:  "the power manager's presentation mode",
 }
 
 var (
@@ -54,6 +57,43 @@ func hasAnyPrefix(text string, prefixes ...string) bool {
 		if strings.HasPrefix(text, p) {
 			return true
 		}
+	}
+	return false
+}
+
+// xfconfSwitch returns the id of the Xfconf-backed switch the error text
+// starts with, when the text mentions the settings service at all.
+func xfconfSwitch(text string) (string, bool) {
+	if !strings.Contains(text, "xfconf: ") {
+		return "", false
+	}
+	for _, id := range []string{idIcons, idNotifications, idWallpaper, idPresentation} {
+		if hasSwitchPrefix(text, id) {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// xfconfRestoring reports whether the Xfconf switch id failed while restoring
+// (its restore errors read "<id>: restore ...").
+func xfconfRestoring(text, id string) bool {
+	return strings.HasPrefix(text, id+": restore ")
+}
+
+func xfconfTimedOut(text string) bool {
+	return strings.Contains(text, "xfconf: ") && strings.Contains(text, "timed out after")
+}
+
+// xfconfUnreachable reports a failure to connect to the session bus or to
+// reach (or start) xfconfd on it.
+func xfconfUnreachable(err error, text string) bool {
+	if strings.Contains(text, "xfconf: connect:") {
+		return true
+	}
+	var de dbus.Error
+	if errors.As(err, &de) {
+		return de.Name == "org.freedesktop.DBus.Error.ServiceUnknown" || de.Name == "org.freedesktop.DBus.Error.NameHasNoOwner"
 	}
 	return false
 }
@@ -129,12 +169,33 @@ var rules = []rule{
 		}
 		return "", false
 	}},
-	{"xfconf-query missing", func(err error, text string) (string, bool) {
-		for _, id := range []string{idIcons, idNotifications, idWallpaper} {
-			if hasSwitchPrefix(text, id) &&
-				(errors.Is(err, exec.ErrNotFound) || strings.Contains(text, "executable file not found")) {
-				return fmt.Sprintf("Couldn't change %s: xfconf-query was not found. Prezilla needs an XFCE session.", nouns[id]), true
-			}
+	{"xfconf restore: settings service timed out", func(_ error, text string) (string, bool) {
+		if id, ok := xfconfSwitch(text); ok && xfconfRestoring(text, id) && xfconfTimedOut(text) {
+			return fmt.Sprintf(`Couldn't restore %s: XFCE's settings service (xfconfd) didn't answer in time. Run "prezilla off" again.`, nouns[id]), true
+		}
+		return "", false
+	}},
+	{"xfconf enable: settings service timed out", func(_ error, text string) (string, bool) {
+		if id, ok := xfconfSwitch(text); ok && xfconfTimedOut(text) {
+			return fmt.Sprintf(`Couldn't change %s: XFCE's settings service (xfconfd) didn't answer in time. Run "prezilla off", then try again.`, nouns[id]), true
+		}
+		return "", false
+	}},
+	{"xfconf restore: settings service unreachable", func(err error, text string) (string, bool) {
+		if id, ok := xfconfSwitch(text); ok && xfconfRestoring(text, id) && xfconfUnreachable(err, text) {
+			return fmt.Sprintf(`Couldn't restore %s: XFCE's settings service (xfconfd) isn't reachable. Log in to your XFCE session again, then run "prezilla off" again.`, nouns[id]), true
+		}
+		return "", false
+	}},
+	{"xfconf enable: settings service unreachable", func(err error, text string) (string, bool) {
+		if id, ok := xfconfSwitch(text); ok && xfconfUnreachable(err, text) {
+			return fmt.Sprintf(`Couldn't change %s: XFCE's settings service (xfconfd) isn't reachable. Run Prezilla inside an XFCE session, or remove "%s" from "switches" in config.json.`, nouns[id], id), true
+		}
+		return "", false
+	}},
+	{"presentation: unexpected value", func(_ error, text string) (string, bool) {
+		if strings.HasPrefix(text, "presentation: read presentation mode: unexpected value") {
+			return `Couldn't change the power manager's presentation mode: its setting isn't a yes/no value. Reset it in the power manager's settings, or remove "presentation" from "switches" in config.json.`, true
 		}
 		return "", false
 	}},

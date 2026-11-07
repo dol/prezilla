@@ -41,11 +41,11 @@ func TestExecRunnerNonZeroIncludesStderr(t *testing.T) {
 
 func TestFakeRunnerRecordsAndReplays(t *testing.T) {
 	f := &FakeRunner{
-		Out: map[string]string{"xfconf-query -c x -p /y": "value"},
+		Out: map[string]string{"echo -c x -p /y": "value"},
 		Err: map[string]error{"bad cmd": context.Canceled},
 	}
 
-	out, err := f.Run(context.Background(), "xfconf-query", "-c", "x", "-p", "/y")
+	out, err := f.Run(context.Background(), "echo", "-c", "x", "-p", "/y")
 	if err != nil || out != "value" {
 		t.Fatalf("got (%q, %v), want (\"value\", nil)", out, err)
 	}
@@ -59,7 +59,7 @@ func TestFakeRunnerRecordsAndReplays(t *testing.T) {
 		t.Fatalf("unknown key: got (%q, %v), want (\"\", nil)", out, err)
 	}
 
-	want := []string{"xfconf-query -c x -p /y", "bad cmd", "unknown"}
+	want := []string{"echo -c x -p /y", "bad cmd", "unknown"}
 	if len(f.Calls) != len(want) {
 		t.Fatalf("Calls = %v, want %v", f.Calls, want)
 	}
