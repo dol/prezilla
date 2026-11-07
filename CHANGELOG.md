@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tray menu entry "About Prezilla": a small window (via the optional `zenity`, else a built-in X11 window) with the project link and a "Close" button; without an X display, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity`.
 - System tray front-end (`prezilla tray`) with an autostart entry.
 - Tray timer entry showing when presentation mode ends and the minutes left, with a "Reset timer to N min" entry below it once the label says less than N minutes are left (at least a minute has passed; right after turning on, the item is hidden because it would change nothing) (the end time becomes N minutes from now; a later one is kept).
-- Left-click on the tray icon toggles presentation mode; the menu shows a "Presentation mode" checkbox instead of a state label. Toggle clicks within 1 s of a toggle starting or finishing are ignored, so a double click does not flip the mode twice.
+- Left-click on the tray icon toggles presentation mode; the menu shows a "Presentation mode" checkbox instead of a state label. Toggle clicks within 500 ms of an accepted toggle are ignored, so a double click does not flip the mode twice.
 - Tray "Keep presenting?" prompt when the screensaver starts during a timed session: a sticky critical notification with "Keep presenting for N min" and "Stop presenting" actions, plus the same entries at the top of the tray menu in case do-not-disturb hides the notification.
 - Five XFCE switches, each saving the original value and restoring it on `off`:
   desktop icons, notifications, audio mute, minimize windows and wallpaper.
