@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/jfreymuth/pulse"
@@ -31,6 +32,12 @@ func withClient[T any](parent context.Context, p PulseAudio, fn func(*pulse.Clie
 	var zero T
 	if err := parent.Err(); err != nil {
 		return zero, fmt.Errorf("pulse: %w", err)
+	}
+	// Without either variable the library falls back to the relative path
+	// "pulse/native" (resolved against the working directory) and would send
+	// the user's cookie to whatever listens there.
+	if os.Getenv("PULSE_SERVER") == "" && os.Getenv("XDG_RUNTIME_DIR") == "" {
+		return zero, errors.New("pulse: connect: neither PULSE_SERVER nor XDG_RUNTIME_DIR is set")
 	}
 	timeout := p.timeout()
 	ctx, cancel := context.WithTimeout(parent, timeout)

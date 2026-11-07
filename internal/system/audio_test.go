@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -20,6 +21,53 @@ func TestPulseAudioNoServerErrorsFast(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("took %s", d)
+	}
+}
+
+func TestPulseAudioRefusesRelativeSocket(t *testing.T) {
+	// Truly unset (t.Setenv restores them afterwards): an empty-but-set
+	// PULSE_SERVER would already make the library refuse.
+	for _, k := range []string{"PULSE_SERVER", "XDG_RUNTIME_DIR"} {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	// A server listening at the relative path the library would fall back to.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "pulse"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", filepath.Join(dir, "pulse", "native"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	var n atomic.Int32
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			n.Add(1)
+			c.Close()
+		}
+	}()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	_, err = PulseAudio{Timeout: time.Second}.DefaultSinkName(context.Background())
+	if err == nil || err.Error() != "pulse: connect: neither PULSE_SERVER nor XDG_RUNTIME_DIR is set" {
+		t.Fatalf("got %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := n.Load(); got != 0 {
+		t.Fatalf("dialled the relative socket %d times", got)
 	}
 }
 
