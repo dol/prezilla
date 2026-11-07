@@ -5,7 +5,6 @@ version: ${VERSION}
 section: utils
 maintainer: Dominic Lüchinger <dominic@snowgarden.ch>
 description: Toggle presentation mode (icons, notifications, presentation, mute, minimize, wallpaper) from a tray icon or CLI.
-# ASSUMPTION: no git remote exists yet; inferred from the sibling project github.com/dol/tunewise.
 homepage: https://github.com/dol/prezilla
 license: Apache-2.0
 
