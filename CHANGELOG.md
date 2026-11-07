@@ -6,12 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- Plain-language errors: the common failures (no sound server, no X display, missing `xfconf-query`, no wallpaper image, another action running, unreadable saved state, invalid `config.json`, unsupported desktop) are reported as a sentence with a next step; the technical text follows in parentheses on stderr and is left out of the tray tooltip.
+- Tray: the Quit item reads "Quit (presentation stays on)" while presentation mode is on, and "Quit" otherwise.
+- Tray: if zenity cannot open its window because the display is dead, About falls back to the notification instead of doing nothing.
+- Plain-language errors: the common failures (no sound server, no X display, missing `xfconf-query`, no wallpaper image, another action running, unreadable saved state, invalid `config.json`, unsupported desktop) are reported as a sentence with a next step (also timeouts of the sound and X servers, a state file that cannot be saved, a deadline timer that cannot be started, and a notification server without buttons); the technical text follows in parentheses on stderr and is left out of the tray tooltip.
 - `prezilla` CLI: `on`, `off`, `toggle`, `status` and `version`.
 - `prezilla about` prints version, license and website.
 - Tray menu entry "About Prezilla": a small window (via the optional `zenity`) with the project link and a "Close" button; without `zenity`, or if it fails, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity`.
 - System tray front-end (`prezilla tray`) with an autostart entry.
-- Tray timer entry showing when presentation mode ends and the minutes left, with a "Reset timer to N min" entry below it while less than N minutes are left (the end time becomes N minutes from now; a later one is kept).
+- Tray timer entry showing when presentation mode ends and the minutes left, with a "Reset timer to N min" entry below it once the label says less than N minutes are left (at least a minute has passed; right after turning on, the item is hidden because it would change nothing) (the end time becomes N minutes from now; a later one is kept).
 - Left-click on the tray icon toggles presentation mode; the menu shows a "Presentation mode" checkbox instead of a state label. Toggle clicks within 500 ms of an accepted toggle are ignored, so a double click does not flip the mode twice.
 - Tray "Keep presenting?" prompt when the screensaver starts during a timed session: a sticky critical notification with "Keep presenting for N min" and "Stop presenting" actions, plus the same entries at the top of the tray menu in case do-not-disturb hides the notification.
 - Five XFCE switches, each saving the original value and restoring it on `off`:
