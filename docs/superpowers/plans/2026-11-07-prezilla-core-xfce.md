@@ -17,7 +17,8 @@
 - Toggling twice must leave the system exactly as it was (restore original values, never forced defaults).
 - CLI subcommands (exact): `on`, `off`, `toggle`, `status`, `tray`, `version`. Exit codes: 0 success, 1 runtime error, 2 usage error.
 - Config: `os.UserConfigDir()/prezilla/config.json`. State: `os.UserStateDir`-style, i.e. `$XDG_STATE_HOME/prezilla/state.json`, falling back to `~/.local/state/prezilla/state.json`.
-- No dependencies beyond stdlib except `fyne.io/systray` (tray task only).
+- No dependencies beyond stdlib except `fyne.io/systray` (tray task only), `github.com/godbus/dbus/v5` (already in the graph via systray), and — added on the user's request (they do not want to install `pactl`/`wmctrl`) — `github.com/jfreymuth/pulse` (native PulseAudio/PipeWire-pulse protocol, Task 11) and `github.com/jezek/xgbutil` (EWMH over pure-Go X11, Task 12). No cgo anywhere.
+- Runtime requirement from the user: no extra packages beyond the XFCE session itself (`xfconf-query` ships with XFCE). `pactl`, `wmctrl` and `env` must NOT be required after Task 13.
 - XFCE on X11 only; Wayland sessions are not a target of this plan.
 - Auto-disable timeout: default 30 minutes, config key `timeout_minutes` (0 = no timeout); `prezilla on --for <duration>` (Go duration, e.g. `45m`) overrides, `--for 0` means none. Deadline stored in state as `expires_at`. Expiry must still fire after the laptop was suspended past the deadline (deadline compared to wall clock, never a single long sleep).
 - `status` prints `inactive`, `active`, or `active until HH:MM` (local 24h time) when a deadline is set, plus newline.
@@ -31,6 +32,9 @@
 5. Corrupt or unreadable `state.json`: error naming the file path, no silent reset that would lose originals — Task 2.
 6. Running on an unsupported desktop (no `XDG_CURRENT_DESKTOP` match): CLI exits 1 with `unsupported desktop "<value>"` — Task 6.
 7. No tray host available (no StatusNotifier watcher): `prezilla tray` exits 1 with a hint to use the CLI instead of hanging — Task 8.
+13. No audio server running / socket missing / sink unplugged between `on` and `off`: mute errors clearly (or no-ops for a vanished sink), never panics or hangs, other switches proceed — Task 11.
+14. No `DISPLAY` / X server unreachable: minimize errors clearly, other switches proceed — Task 12.
+15. Saved state written by the tool-based version (`yes`/`no`, `<name>\tyes|no`, `on`/`off`) must still restore after upgrading to the native backends — Tasks 11 and 12.
 11. Installed package without its icon or desktop entry (missing size, wrong `Icon=` name) looks broken in menus and the panel: `scripts/check-install.sh` over a `DESTDIR` install and over the extracted `.deb` — Task 10.
 12. A packaged binary that reports `dev` instead of the release version, or a release built without the pinned tag version — Task 10 (`prezilla version` on the extracted deb).
 8. Deadline passes while the machine is suspended: next poll/watcher wake restores immediately — Task 3 (`DisableIfExpired` with injected clock) and Task 6 (watcher polls).
@@ -53,6 +57,7 @@
 - `packaging/prezilla.desktop`, `README.md`.
 - `packaging/icons/**`, `scripts/render-icons.sh`, `internal/tray/icons/` — icon sources, rendered hicolor set, embedded tray icons (Task 7).
 - `Makefile`, `nfpm.yaml`, `CHANGELOG.md`, `LICENSE`, `.github/workflows/`, `scripts/check-install.sh` — build, install, packages, CI (Task 10).
+- `internal/system/{audio,pulse,windows,x11}.go` — native PulseAudio and X11/EWMH clients behind `Audio`/`Windows` interfaces and `Backends` (Tasks 11–12); Task 13 removes the old tool dependencies from docs and packages.
 
 ---
 
@@ -268,6 +273,62 @@ Design (decided; in the style of the sibling project `/home/dol/project/tunewise
 - [ ] **Step 5: Write `CHANGELOG.md`** (Keep a Changelog format as in the sibling project, `[Unreleased]` listing the CLI, tray, five XFCE switches, auto-disable timeout, icons, packaging), `LICENSE`, `.github/workflows/ci.yml` and `release.yml`; validate both workflow files parse as YAML (`python3 -c "import yaml,sys;[yaml.safe_load(open(f)) for f in sys.argv[1:]]" .github/workflows/*.yml`).
 - [ ] **Step 6: Update `README.md` install section** (release packages table: deb / rpm / pkg.tar.zst / tarball; from source: `make install`; autostart note) and add `/dist/` to `.gitignore` if not present.
 - [ ] **Step 7: Commit** `feat: packaging, makefile, changelog and ci`.
+
+---
+
+### Task 11: Native audio backend (replaces `pactl`)
+
+**Files:**
+- Create: `internal/system/audio.go`, `internal/system/pulse.go`, `internal/system/audio_test.go`; Modify: `internal/platform/xfce/mute.go`, `internal/platform/xfce/xfce.go`, `internal/platform/detect.go`, `cmd/prezilla/main.go`, their tests, `go.mod`/`go.sum`
+
+**Interfaces:**
+- Consumes: `core.Switch`; the existing mute semantics and saved formats from Task 4 and the final fix wave.
+- Produces:
+  - `type Audio interface { DefaultSinkName(ctx context.Context) (string, error); SinkMuted(ctx context.Context, name string) (bool, error); SetSinkMute(ctx context.Context, name string, mute bool) error; SinkExists(ctx context.Context, name string) (bool, error) }` in `audio.go`, plus `type FakeAudio struct` (exported, non-test file like `FakeRunner`; records calls as strings, per-method canned values and errors).
+  - `type PulseAudio struct{ Timeout time.Duration }` implementing `Audio` with `github.com/jfreymuth/pulse` (zero `Timeout` = 10 s). Each call opens a client (`pulse.NewClient(pulse.ClientApplicationName("prezilla"))`), closes it, and is bounded by `ctx` and `Timeout` (library calls are not context-aware: run in a goroutine and return `ctx.Err()`/a timeout error naming `pulse`). Mute state is read with `proto.GetSinkInfo{SinkName}` and set with `proto.SetSinkMute{SinkName, Mute}` through `Client.RawRequest`; the default sink via `Client.DefaultSink()`; existence via `Client.ListSinks()` (exact name match). Connection failure error text: `pulse: connect: <err>`.
+  - `type system.Backends struct { Runner Runner; Audio Audio }` (Task 12 adds `Windows`). `xfce.Switches(b system.Backends, cfg core.Config)`, `xfce.All(b system.Backends, cfg core.Config)`, `platform.Switches(desktop string, b system.Backends, cfg core.Config)` and `platform.AllSwitches(desktop string, b system.Backends, cfg core.Config)` replace the `system.Runner` parameter; `xfce.NewMute(a system.Audio) core.Switch`.
+- Behavior preserved exactly: saved value `<name>\t<yes|no>`; legacy `yes`/`no` and the literal name `@DEFAULT_SINK@` resolve to the current default sink at restore; Enable fails closed (error, no mute call) if the state cannot be read; restore unmutes only if saved `no`; a vanished sink on restore is `nil`; an empty sink name in saved state is "nothing to restore". The `env LC_ALL=C` / text parsing code and its tests are deleted.
+
+- [ ] **Step 1: Write failing tests** using `FakeAudio`: every existing mute test re-expressed (already-muted stays muted; unmuted restored; default sink changed between enable and disable restores the original named sink; vanished sink → nil with no set call; legacy saved values; get-default-sink failure falls back to resolving `@DEFAULT_SINK@`-style legacy at restore; read failure → Enable error and no set call), plus `TestMuteEnableErrorNamesPulse` and in `audio_test.go`: `TestPulseAudioNoServerErrorsFast` (point `PULSE_SERVER` at a nonexistent unix socket; `DefaultSinkName` returns an error containing `pulse` within 2 s; no panic) and `TestPulseAudioHonoursContext` (cancelled ctx returns promptly).
+- [ ] **Step 2: Run** `go test ./internal/system/... ./internal/platform/...` — Expected: FAIL.
+- [ ] **Step 3: `go get github.com/jfreymuth/pulse@latest`; implement `audio.go`, `pulse.go`, the new `NewMute`, the `Backends` plumbing and `main.go` wiring** (real `PulseAudio{}` and `ExecRunner{}`); check the real reply struct field names with `go doc github.com/jfreymuth/pulse/proto GetSinkInfoReply`.
+- [ ] **Step 4: Run** `go vet ./... && go test -race -count=1 ./...` — Expected: PASS.
+- [ ] **Step 5: Manual check on the real PipeWire/PulseAudio server** with a throwaway program under the scratchpad (not `prezilla on`): print `DefaultSinkName` and `SinkMuted`, then `SetSinkMute(true)`, read it back, `SetSinkMute(false)` restoring the original state in a `defer`; run `PULSE_SERVER=unix:/nonexistent` to see the error text. Record the output.
+- [ ] **Step 6: Commit** `feat: native PulseAudio client replaces pactl`.
+
+---
+
+### Task 12: Native window backend (replaces `wmctrl`)
+
+**Files:**
+- Create: `internal/system/windows.go`, `internal/system/x11.go`, `internal/system/windows_test.go`; Modify: `internal/platform/xfce/minimize.go`, `internal/platform/xfce/xfce.go`, `cmd/prezilla/main.go`, `internal/system/audio.go` (add the field to `Backends`), their tests, `go.mod`/`go.sum`
+
+**Interfaces:**
+- Produces:
+  - `type Windows interface { ShowingDesktop(ctx context.Context) (bool, error); SetShowingDesktop(ctx context.Context, show bool) error }` plus `type FakeWindows struct` (records calls, canned value/errors).
+  - `type X11Windows struct{ Timeout time.Duration }` implementing `Windows` with `github.com/jezek/xgbutil` (`xgbutil.NewConn()`, `ewmh.ShowingDesktopGet`, `ewmh.ShowingDesktopReq`); zero `Timeout` = 10 s; each call opens and closes its own connection and is bounded by `ctx`/`Timeout` like `PulseAudio`; no `DISPLAY` or unreachable server error text: `x11: connect: <err>`.
+  - `system.Backends` gains `Windows Windows`; `xfce.NewMinimize(w system.Windows) core.Switch`; `platform`/`xfce` constructors keep the signatures from Task 11.
+- Behavior preserved: saved `on`/`off`; Enable reads state first (error → fail closed, nothing set), sets showing-desktop; Disable restores only if saved `off`; a corrupt saved value is a no-op. The `wmctrl -m` parsing code and its tests are deleted.
+
+- [ ] **Step 1: Write failing tests** with `FakeWindows`: enable shows desktop and saves `off`; already showing → saved `on`, not restored; read failure → error, no set; Disable no-op for corrupt value; and `TestX11WindowsNoDisplayErrorsFast` (unset `DISPLAY`: `ShowingDesktop` returns an error containing `x11` within 2 s, no panic).
+- [ ] **Step 2: Run** `go test ./internal/system/... ./internal/platform/...` — Expected: FAIL.
+- [ ] **Step 3: `go get github.com/jezek/xgbutil@latest`; implement** `windows.go`, `x11.go`, the new `NewMinimize`, the `Backends.Windows` field and `main.go` wiring.
+- [ ] **Step 4: Run** `go vet ./... && go test -race -count=1 ./...` — Expected: PASS.
+- [ ] **Step 5: Manual check on this XFCE/X11 session** with a throwaway program (not `prezilla on`): print `ShowingDesktop`; only if it is false, `SetShowingDesktop(true)`, read back true, then `SetShowingDesktop(false)` in a `defer`, so the user's windows are hidden for about one second; if it is already true, do read-only. Record the output.
+- [ ] **Step 6: Commit** `feat: native EWMH client replaces wmctrl`.
+
+---
+
+### Task 13: Drop `pactl`/`wmctrl` from docs, packages and checks
+
+**Files:**
+- Modify: `README.md`, `nfpm.yaml`, `CHANGELOG.md`, `go.mod`/`go.sum` (`go mod tidy`), `scripts/check-install.sh` only if it mentions the tools
+
+- [ ] **Step 1: Search** (`grep -rn "wmctrl\|pactl\|pulseaudio-utils\|LC_ALL" --exclude-dir=.git --exclude-dir=.superpowers .`) and remove every remaining runtime requirement or leftover code/comment from the project (the plan file itself is history and stays).
+- [ ] **Step 2: Update `README.md`:** prerequisites become the XFCE session (`xfconf-query`) plus the panel Status Notifier plugin; troubleshooting covers `pulse: connect` (no PulseAudio/PipeWire-pulse server) and `x11: connect` (no X display); remove the apt install hint for `wmctrl`/`pulseaudio-utils`.
+- [ ] **Step 3: Update `nfpm.yaml`:** remove the `recommends`/`depends` entries for `wmctrl`, `pulseaudio-utils`, `libpulse` for all three packagers. Add a `[Unreleased]` CHANGELOG entry (Changed: mute and show-desktop no longer need external tools).
+- [ ] **Step 4: Run** `go mod tidy && go vet ./... && go test -race -count=1 ./... && make package VERSION=0.0.0-test` then `dpkg-deb -I dist/prezilla_0.0.0-test_amd64.deb` — Expected: all pass and the control file has no `wmctrl`/`pulseaudio-utils`. `ldd ./prezilla` (after `make build`) prints `not a dynamic executable`.
+- [ ] **Step 5: Commit** `chore: drop pactl and wmctrl from docs and packages`.
 
 ---
 
