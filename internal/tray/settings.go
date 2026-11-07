@@ -37,9 +37,15 @@ const chooseWallpaperTitle = "Choose wallpaper…"
 
 // The notification sent when Choose wallpaper… cannot open a file chooser.
 const (
-	noZenitySummary = "Choose wallpaper"
-	noZenityBody    = `Prezilla needs zenity to browse for an image. Install zenity, or set "wallpaper" in config.json.`
+	noChooserSummary = "Choose wallpaper"
+	noChooserBody    = `Prezilla can't open a file chooser. Install xdg-desktop-portal-gtk (or zenity), or set "wallpaper" in config.json.`
 )
+
+// noChooser reports whether err means no file chooser could be opened at
+// all (neither the portal nor zenity).
+func noChooser(err error) bool {
+	return errors.Is(err, system.ErrNoChooser) || errors.Is(err, system.ErrNoZenity)
+}
 
 // settings holds the switch tick and wallpaper logic behind the tray menu.
 // Its methods may run at the same time (a tick change while the chooser
@@ -137,7 +143,7 @@ func (s *settings) setTickLocked(ctx context.Context, id string, on bool) (choos
 // the wallpaper switch ticked. While the mode is active the new image is
 // applied at once: the saved original is restored first, then the switch is
 // applied with the new image, so the original stays the one saved. A
-// cancelled chooser changes nothing; a missing zenity sends one notification
+// cancelled chooser changes nothing; a missing chooser sends one notification
 // instead of an error. Only the dialog runs under ctx (which may be long);
 // everything after it is bounded by core.OperationTimeout, since the engine
 // holds the state lock for as long as its context allows.
@@ -153,13 +159,13 @@ func (s *settings) ChooseWallpaper(ctx context.Context) error {
 	switch {
 	case errors.Is(err, system.ErrCancelled):
 		return nil
-	case errors.Is(err, system.ErrNoZenity):
+	case noChooser(err):
 		if s.Notify == nil {
 			return err
 		}
 		nctx, cancel := bounded()
 		defer cancel()
-		return s.Notify(nctx, noZenitySummary, noZenityBody)
+		return s.Notify(nctx, noChooserSummary, noChooserBody)
 	case err != nil:
 		return err
 	}

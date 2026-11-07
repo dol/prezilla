@@ -264,7 +264,7 @@ type Config struct {
 	// when one changes.
 	ConfigPath string
 	// Chooser picks the wallpaper image for Choose wallpaper…; nil behaves
-	// like a missing zenity.
+	// like no file chooser being available.
 	Chooser system.FileChooser
 	// StartDir is where the chooser opens (the user's home directory).
 	StartDir string
@@ -282,7 +282,7 @@ const chooseTimeout = 30*time.Minute + core.OperationTimeout
 
 // quitChooser closes the dialog of inner when quit ends (Quit or a signal),
 // while the rest of Choose wallpaper… keeps its detached context; a dialog
-// closed that way counts as cancelled. A nil inner reports a missing zenity.
+// closed that way counts as cancelled. A nil inner reports ErrNoChooser.
 type quitChooser struct {
 	quit  context.Context
 	inner system.FileChooser
@@ -290,7 +290,7 @@ type quitChooser struct {
 
 func (q quitChooser) ChooseImage(ctx context.Context, startDir string) (string, error) {
 	if q.inner == nil {
-		return "", fmt.Errorf("%w: no file chooser configured", system.ErrNoZenity)
+		return "", fmt.Errorf("%w: no file chooser configured", system.ErrNoChooser)
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -303,7 +303,7 @@ func (q quitChooser) ChooseImage(ctx context.Context, startDir string) (string, 
 }
 
 // newSettings builds the tick box and wallpaper logic from cfg; quit closes
-// an open chooser. The missing-zenity message goes out as a notification
+// an open chooser. The no-chooser message goes out as a notification
 // when there is a notifier, otherwise it is an error.
 func newSettings(quit context.Context, cfg Config) *settings {
 	s := &settings{

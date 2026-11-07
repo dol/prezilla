@@ -3,6 +3,7 @@ package tray
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -475,18 +476,28 @@ func TestChooseWallpaperCancelled(t *testing.T) {
 	}
 }
 
-func TestChooseWallpaperNoZenityNotifies(t *testing.T) {
+func TestChooseWallpaperNoChooserNotifies(t *testing.T) {
+	for _, cerr := range []error{
+		errors.Join(system.ErrNoZenity, errors.New("exec: not found")),
+		fmt.Errorf("%w: %w", system.ErrNoChooser, system.ErrNoPortal),
+	} {
+		testChooseWallpaperNoChooserNotifies(t, cerr)
+	}
+}
+
+func testChooseWallpaperNoChooserNotifies(t *testing.T, cerr error) {
+	t.Helper()
 	f := newSettingsFixture(t)
-	f.chooser.Err = errors.Join(system.ErrNoZenity, errors.New("exec: not found"))
+	f.chooser.Err = cerr
 	if err := f.s.ChooseWallpaper(context.Background()); err != nil {
 		t.Fatalf("got %v, want nil", err)
 	}
-	want := []notice{{"Choose wallpaper", `Prezilla needs zenity to browse for an image. Install zenity, or set "wallpaper" in config.json.`}}
+	want := []notice{{"Choose wallpaper", `Prezilla can't open a file chooser. Install xdg-desktop-portal-gtk (or zenity), or set "wallpaper" in config.json.`}}
 	if !slices.Equal(f.notes, want) {
 		t.Errorf("notes %q, want %q", f.notes, want)
 	}
 	if len(f.eng.calls) != 0 || f.readConfigText(t) != "" {
-		t.Errorf("no zenity changed something: engine %v", f.eng.calls)
+		t.Errorf("no chooser changed something: engine %v", f.eng.calls)
 	}
 	// Ticking Change wallpaper without an image shows the same message.
 	f.notes = nil

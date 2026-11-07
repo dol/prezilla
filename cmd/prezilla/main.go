@@ -75,10 +75,15 @@ func run(ctx context.Context) int {
 			ScreenSaver: system.DBusScreenSaver{},
 			Prompter:    system.DBusPrompter{},
 			ConfigPath:  core.DefaultConfigPath(),
-			// The chooser waits for the user, so its runner gets a long
-			// timeout; Quit still closes it through ctx. zenity 4 reads
-			// --filename as a file path first, so run it from "/".
-			Chooser:  system.ZenityChooser{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}},
+			// The desktop's file chooser portal first, zenity when there is
+			// no portal. The dialog waits for the user, so zenity's runner
+			// gets a long timeout; Quit still closes either through ctx.
+			// zenity 4 reads --filename as a file path first, so run it
+			// from "/".
+			Chooser: &system.FallbackChooser{
+				Primary:   system.PortalChooser{},
+				Secondary: system.ZenityChooser{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}},
+			},
 			StartDir: homeDir(),
 			SwitchFor: func(id, image string) (core.Switch, error) {
 				return platform.Switch(desktop, backends, id, image)

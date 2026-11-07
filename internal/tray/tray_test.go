@@ -838,10 +838,10 @@ func TestQuitChooserClosesDialogOnQuitAsCancelled(t *testing.T) {
 	}
 }
 
-func TestQuitChooserWithoutChooserIsNoZenity(t *testing.T) {
+func TestQuitChooserWithoutChooserIsNoChooser(t *testing.T) {
 	q := quitChooser{quit: context.Background()}
-	if _, err := q.ChooseImage(context.Background(), "/"); !errors.Is(err, system.ErrNoZenity) {
-		t.Fatalf("err = %v, want ErrNoZenity", err)
+	if _, err := q.ChooseImage(context.Background(), "/"); !errors.Is(err, system.ErrNoChooser) {
+		t.Fatalf("err = %v, want ErrNoChooser", err)
 	}
 }
 
