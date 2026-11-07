@@ -705,12 +705,12 @@ func TestNoHostErrorKeepsLowercaseCommand(t *testing.T) {
 
 func TestTooltipUsesShortSentencesWithoutDetails(t *testing.T) {
 	err := errors.Join(
-		fmt.Errorf("mute: %w", errors.New("pulse: connect: refused")),
+		fmt.Errorf("mute: %w", fmt.Errorf("read sink mute: %w", errors.New("pulse: connect: refused"))),
 		errors.New("boom"),
 	)
 	got := tooltip(true, "", usererr.Short(err), "", false)
 	want := "Prezilla: presentation mode on (error: " +
-		`Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json.; boom)`
+		`Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json. boom)`
 	if got != want {
 		t.Errorf("got %q\nwant %q", got, want)
 	}
@@ -722,7 +722,7 @@ func TestTooltipUsesShortSentencesWithoutDetails(t *testing.T) {
 func TestActionStateKeepsShortTextForTooltip(t *testing.T) {
 	var a actionState
 	a.run(context.Background(), func(context.Context) error {
-		return fmt.Errorf("minimize: %w", errors.New("x11: connect: no display"))
+		return fmt.Errorf("minimize: %w", fmt.Errorf("show desktop: %w", errors.New("x11: connect: no display")))
 	}, func() {})
 	if got := a.text(); strings.Contains(got, "x11: connect") || !strings.HasPrefix(got, "Couldn't show the desktop:") {
 		t.Errorf("text %q", got)
@@ -738,7 +738,7 @@ func TestExpiryNoteDeduplicatesOnExplainedText(t *testing.T) {
 	if n2 := noteExpiry(n.explained, err); n2.print {
 		t.Errorf("same error printed twice: %+v", n2)
 	}
-	mapped := fmt.Errorf("mute: %w", errors.New("pulse: connect: refused"))
+	mapped := fmt.Errorf("mute: %w", fmt.Errorf("read sink mute: %w", errors.New("pulse: connect: refused")))
 	m := noteExpiry(n.explained, mapped)
 	if !m.print || m.explained != usererr.Explain(mapped) || strings.Contains(m.short, "details:") {
 		t.Errorf("mapped: %+v", m)

@@ -41,7 +41,7 @@ func TestResolveConfigFallbackOrFail(t *testing.T) {
 				t.Errorf("%s: cfg=%+v err=%v, want defaults", c.cmd, cfg, err)
 			}
 			want := "warning: The configuration file (/x/config.json) isn't valid JSON. Fix it, or delete it to use the defaults." +
-				" (details: " + broken.Error() + "); using default configuration\n"
+				" Prezilla is using the default configuration for now. (details: " + broken.Error() + ")\n"
 			if errOut.String() != want {
 				t.Errorf("%s: stderr %q want %q", c.cmd, errOut.String(), want)
 			}

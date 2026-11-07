@@ -51,14 +51,28 @@ func hasSwitchPrefix(text, id string) bool { return strings.HasPrefix(text, id+"
 // rules is the single matcher table: one row per case. Only the listed
 // prefix/cause combinations are rewritten; everything else is left alone.
 var rules = []rule{
+	{"minimize restore: no X display", func(_ error, text string) (string, bool) {
+		if hasSwitchPrefix(text, idMinimize) && strings.Contains(text, "restore desktop: ") && strings.Contains(text, "x11: connect") {
+			return `Couldn't bring your windows back: no X display is reachable (Prezilla needs an X11 session). Run "prezilla off" again in an X11 session.`, true
+		}
+		return "", false
+	}},
+	{"mute restore: no pulse server", func(_ error, text string) (string, bool) {
+		if hasSwitchPrefix(text, idMute) && strings.Contains(text, "unmute sink: ") && strings.Contains(text, "pulse: connect") {
+			return `Couldn't restore the sound: no PulseAudio or PipeWire server is running. Start your sound server, then run "prezilla off" again.`, true
+		}
+		return "", false
+	}},
 	{"mute: no pulse server", func(_ error, text string) (string, bool) {
-		if hasSwitchPrefix(text, idMute) && strings.Contains(text, "pulse: connect") {
+		if hasSwitchPrefix(text, idMute) && (strings.HasPrefix(text, "mute: read sink mute: ") || strings.HasPrefix(text, "mute: mute sink: ")) &&
+			strings.Contains(text, "pulse: connect") {
 			return `Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json.`, true
 		}
 		return "", false
 	}},
 	{"minimize: no X display", func(_ error, text string) (string, bool) {
-		if hasSwitchPrefix(text, idMinimize) && strings.Contains(text, "x11: connect") {
+		if hasSwitchPrefix(text, idMinimize) && (strings.HasPrefix(text, "minimize: read showing desktop: ") || strings.HasPrefix(text, "minimize: show desktop: ")) &&
+			strings.Contains(text, "x11: connect") {
 			return `Couldn't show the desktop: no X display is reachable (Prezilla needs an X11 session). Log in to an X11 session, or remove "minimize" from "switches" in config.json.`, true
 		}
 		return "", false
@@ -88,7 +102,7 @@ var rules = []rule{
 	{"state unreadable", func(_ error, text string) (string, bool) {
 		if m := parseStateRE.FindStringSubmatch(text); m != nil {
 			return fmt.Sprintf("Prezilla's saved state (%s) is unreadable, so it can't restore your settings automatically. "+
-				"Turn desktop icons, notifications, sound and windows back on by hand, then delete that file.", m[1]), true
+				"Turn desktop icons, notifications, sound and windows back on and set your wallpaper again by hand (the old wallpaper path may still be readable in that file), then delete that file.", m[1]), true
 		}
 		return "", false
 	}},
@@ -100,6 +114,9 @@ var rules = []rule{
 	}},
 	{"unsupported desktop", func(_ error, text string) (string, bool) {
 		if m := unsupportedRE.FindStringSubmatch(text); m != nil {
+			if m[1] == "" {
+				return "Prezilla supports XFCE only (this session reports no desktop). Run it inside an XFCE session.", true
+			}
 			return fmt.Sprintf(`Prezilla supports XFCE only (this session reports "%s"). Run it inside an XFCE session.`, m[1]), true
 		}
 		return "", false
@@ -122,7 +139,7 @@ func leaves(err error) []error {
 }
 
 // sentence returns the plain sentence for one error, if a rule matches.
-func sentence(err error) (string, bool) {
+func sentenceFor(err error) (string, bool) {
 	text := err.Error()
 	for _, r := range rules {
 		if s, ok := r.match(err, text); ok {
@@ -141,7 +158,7 @@ func Explain(err error) string {
 	}
 	var lines []string
 	for _, e := range leaves(err) {
-		if s, ok := sentence(e); ok {
+		if s, ok := sentenceFor(e); ok {
 			lines = append(lines, s+" (details: "+e.Error()+")")
 		} else {
 			lines = append(lines, e.Error())
@@ -150,19 +167,46 @@ func Explain(err error) string {
 	return strings.Join(lines, "\n")
 }
 
-// Short is the sentence only, for tooltips: no details, several joined with
-// "; ". An error without a rule keeps its original text. nil gives "".
-func Short(err error) string {
-	if err == nil {
-		return ""
+// joinSentences joins parts with a space after sentence-ending punctuation
+// and with "; " otherwise.
+func joinSentences(parts []string) string {
+	var b strings.Builder
+	for i, p := range parts {
+		if i > 0 {
+			if strings.HasSuffix(parts[i-1], ".") || strings.HasSuffix(parts[i-1], "!") || strings.HasSuffix(parts[i-1], "?") {
+				b.WriteString(" ")
+			} else {
+				b.WriteString("; ")
+			}
+		}
+		b.WriteString(p)
 	}
-	var parts []string
+	return b.String()
+}
+
+// Short is the sentence only, for tooltips: no details, several joined
+// (see joinSentences). An error without a rule keeps its original text. nil
+// gives "".
+func Short(err error) string {
+	sentence, _ := Split(err)
+	return sentence
+}
+
+// Split returns the Short text and the technical text of the errors that were
+// rewritten, joined with "; ". details is empty when no rule matched, so the
+// sentence is then the original text.
+func Split(err error) (sentence, details string) {
+	if err == nil {
+		return "", ""
+	}
+	var parts, techs []string
 	for _, e := range leaves(err) {
-		if s, ok := sentence(e); ok {
+		if s, ok := sentenceFor(e); ok {
 			parts = append(parts, s)
+			techs = append(techs, e.Error())
 		} else {
 			parts = append(parts, e.Error())
 		}
 	}
-	return strings.Join(parts, "; ")
+	return joinSentences(parts), strings.Join(techs, "; ")
 }

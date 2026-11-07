@@ -10,10 +10,12 @@ import (
 )
 
 const (
-	sMute     = `Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json.`
-	sMinimize = `Couldn't show the desktop: no X display is reachable (Prezilla needs an X11 session). Log in to an X11 session, or remove "minimize" from "switches" in config.json.`
-	sLock     = `Another Prezilla action is still running. Wait a moment and try again.`
-	sWall     = `Couldn't change the wallpaper: no image is set. Set "wallpaper" to an image path in config.json, or remove "wallpaper" from "switches".`
+	sMute        = `Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json.`
+	sMinimize    = `Couldn't show the desktop: no X display is reachable (Prezilla needs an X11 session). Log in to an X11 session, or remove "minimize" from "switches" in config.json.`
+	sMinRestore  = `Couldn't bring your windows back: no X display is reachable (Prezilla needs an X11 session). Run "prezilla off" again in an X11 session.`
+	sMuteRestore = `Couldn't restore the sound: no PulseAudio or PipeWire server is running. Start your sound server, then run "prezilla off" again.`
+	sLock        = `Another Prezilla action is still running. Wait a moment and try again.`
+	sWall        = `Couldn't change the wallpaper: no image is set. Set "wallpaper" to an image path in config.json, or remove "wallpaper" from "switches".`
 )
 
 func xfconfMissing() error {
@@ -22,36 +24,39 @@ func xfconfMissing() error {
 }
 
 func cases() []struct {
-	name     string
-	err      error
-	short    string
-	technica string
+	name  string
+	err   error
+	short string
 } {
 	pulse := fmt.Errorf("mute: %w", fmt.Errorf("read sink mute: %w", errors.New("pulse: connect: dial unix /run/user/1000/pulse/native: connect: no such file or directory")))
 	x11 := fmt.Errorf("minimize: %w", fmt.Errorf("read showing desktop: %w", errors.New("x11: connect: cannot open display")))
 	lock := errors.New("lock /s/state.json.lock: timed out after 5s waiting for another Prezilla process")
 	return []struct {
-		name     string
-		err      error
-		short    string
-		technica string
+		name  string
+		err   error
+		short string
 	}{
-		{"mute pulse", pulse, sMute, pulse.Error()},
-		{"minimize x11", x11, sMinimize, x11.Error()},
+		{"minimize show desktop", fmt.Errorf("minimize: %w", fmt.Errorf("show desktop: %w", errors.New("x11: connect: no display"))), sMinimize},
+		{"mute mute sink", fmt.Errorf("mute: %w", fmt.Errorf("mute sink: %w", errors.New("pulse: connect: refused"))), sMute},
+		{"minimize restore", fmt.Errorf("minimize: %w", fmt.Errorf("restore desktop: %w", errors.New("x11: connect: no display"))), sMinRestore},
+		{"mute restore", fmt.Errorf("mute: %w", fmt.Errorf("unmute sink: %w", errors.New("pulse: connect: refused"))), sMuteRestore},
+		{"unsupported empty desktop", errors.New(`unsupported desktop ""`), "Prezilla supports XFCE only (this session reports no desktop). Run it inside an XFCE session."},
+		{"mute pulse", pulse, sMute},
+		{"minimize x11", x11, sMinimize},
 		{"icons xfconf missing", fmt.Errorf("icons: %w", xfconfMissing()),
-			"Couldn't change desktop icons: xfconf-query was not found. Prezilla needs an XFCE session.", ""},
+			"Couldn't change desktop icons: xfconf-query was not found. Prezilla needs an XFCE session."},
 		{"notifications xfconf missing", fmt.Errorf("notifications: %w", xfconfMissing()),
-			"Couldn't change notifications: xfconf-query was not found. Prezilla needs an XFCE session.", ""},
+			"Couldn't change notifications: xfconf-query was not found. Prezilla needs an XFCE session."},
 		{"wallpaper xfconf missing (text only)", errors.New(`wallpaper: xfconf-query -l: xfconf-query: exec: "xfconf-query": executable file not found in $PATH`),
-			"Couldn't change the wallpaper: xfconf-query was not found. Prezilla needs an XFCE session.", ""},
-		{"wallpaper no image", errors.New(`wallpaper: wallpaper: no image configured (set "wallpaper" in config)`), sWall, ""},
-		{"lock", lock, sLock, lock.Error()},
+			"Couldn't change the wallpaper: xfconf-query was not found. Prezilla needs an XFCE session."},
+		{"wallpaper no image", errors.New(`wallpaper: wallpaper: no image configured (set "wallpaper" in config)`), sWall},
+		{"lock", lock, sLock},
 		{"parse state", errors.New("parse state /home/u/.local/state/prezilla/state.json: invalid character 'x' looking for beginning of value"),
-			"Prezilla's saved state (/home/u/.local/state/prezilla/state.json) is unreadable, so it can't restore your settings automatically. Turn desktop icons, notifications, sound and windows back on by hand, then delete that file.", ""},
+			"Prezilla's saved state (/home/u/.local/state/prezilla/state.json) is unreadable, so it can't restore your settings automatically. Turn desktop icons, notifications, sound and windows back on and set your wallpaper again by hand (the old wallpaper path may still be readable in that file), then delete that file."},
 		{"parse config", errors.New("parse config /home/u/.config/prezilla/config.json: unexpected end of JSON input"),
-			"The configuration file (/home/u/.config/prezilla/config.json) isn't valid JSON. Fix it, or delete it to use the defaults.", ""},
+			"The configuration file (/home/u/.config/prezilla/config.json) isn't valid JSON. Fix it, or delete it to use the defaults."},
 		{"unsupported desktop", errors.New(`unsupported desktop "GNOME"`),
-			`Prezilla supports XFCE only (this session reports "GNOME"). Run it inside an XFCE session.`, ""},
+			`Prezilla supports XFCE only (this session reports "GNOME"). Run it inside an XFCE session.`},
 	}
 }
 
@@ -84,6 +89,11 @@ func TestUnmappedPassesThrough(t *testing.T) {
 		fmt.Errorf("minimize: %w", errors.New("x11: timed out after 5s: "+context.DeadlineExceeded.Error())),
 		fmt.Errorf("mute: %w", xfconfMissing()), // cause the table does not list for mute
 		errors.New("no wallpaper properties found"),
+		fmt.Errorf("minimize: %w", fmt.Errorf("restore desktop: %w", fmt.Errorf("x11: timed out after 5s: %w", context.DeadlineExceeded))),
+		fmt.Errorf("mute: %w", fmt.Errorf("unmute sink: %w", errors.New("pulse: timed out after 5s: context deadline exceeded"))),
+		fmt.Errorf("mute: %w", errors.New("pulse: context canceled")),
+		fmt.Errorf("rollback mute: %w", errors.New("pulse: connect: refused")),
+		fmt.Errorf("save state: %w", errors.New("write state /x: disk full")),
 		errors.New("lock /x.lock: timed out after 5s"), // not the other-process wording
 	} {
 		if got := Explain(err); got != err.Error() {
@@ -102,15 +112,15 @@ func TestNil(t *testing.T) {
 }
 
 func TestJoinGivesOneLinePerError(t *testing.T) {
-	a := fmt.Errorf("mute: %w", errors.New("pulse: connect: refused"))
-	b := fmt.Errorf("minimize: %w", errors.New("x11: connect: no display"))
+	a := fmt.Errorf("mute: %w", fmt.Errorf("mute sink: %w", errors.New("pulse: connect: refused")))
+	b := fmt.Errorf("minimize: %w", fmt.Errorf("show desktop: %w", errors.New("x11: connect: no display")))
 	c := errors.New("boom")
 	err := errors.Join(a, errors.Join(b, c))
 	want := sMute + " (details: " + a.Error() + ")\n" + sMinimize + " (details: " + b.Error() + ")\nboom"
 	if got := Explain(err); got != want {
 		t.Errorf("Explain = %q\nwant %q", got, want)
 	}
-	if got, want := Short(err), sMute+"; "+sMinimize+"; boom"; got != want {
+	if got, want := Short(err), sMute+" "+sMinimize+" boom"; got != want {
 		t.Errorf("Short = %q\nwant %q", got, want)
 	}
 }
@@ -129,7 +139,7 @@ func TestShortNeverHasDetailsAndExplainKeepsTechnicalText(t *testing.T) {
 func TestProductNameSpelling(t *testing.T) {
 	for _, c := range cases() {
 		s := Short(c.err)
-		for _, bad := range []string{"prezilla ", "prezilla's", "Config.json", "Config.JSON"} {
+		for _, bad := range []string{"prezilla's", "Config.json", "Config.JSON"} {
 			if strings.Contains(s, bad) {
 				t.Errorf("%s: %q contains %q", c.name, s, bad)
 			}
@@ -144,5 +154,25 @@ func TestProductNameSpelling(t *testing.T) {
 				t.Errorf("%s: product name not capitalised", name)
 			}
 		}
+	}
+}
+
+func TestShortJoinPunctuation(t *testing.T) {
+	if got := Short(errors.Join(errors.New("a"), errors.New("b"))); got != "a; b" {
+		t.Errorf("got %q", got)
+	}
+	if got := Short(errors.Join(errors.New("x."), errors.New("y"))); got != "x. y" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestSplit(t *testing.T) {
+	err := fmt.Errorf("mute: %w", fmt.Errorf("mute sink: %w", errors.New("pulse: connect: refused")))
+	s, d := Split(err)
+	if s != Short(err) || d != err.Error() {
+		t.Errorf("got %q, %q", s, d)
+	}
+	if s, d := Split(errors.New("boom")); s != "boom" || d != "" {
+		t.Errorf("unmapped: %q, %q", s, d)
 	}
 }

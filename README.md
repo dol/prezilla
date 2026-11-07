@@ -116,10 +116,11 @@ Errors are printed as a plain sentence with a next step; the technical text foll
 - **A switch fails**: the other switches are still applied; fix the cause and run `prezilla off`, then `on`. The common causes:
   - "Couldn't change the sound: no PulseAudio or PipeWire server is running. Start your sound server, or remove "mute" from "switches" in config.json."
   - "Couldn't show the desktop: no X display is reachable (Prezilla needs an X11 session). Log in to an X11 session, or remove "minimize" from "switches" in config.json." Wayland sessions are not supported.
+  - Restoring: "Couldn't bring your windows back: no X display is reachable (Prezilla needs an X11 session). Run "prezilla off" again in an X11 session." and "Couldn't restore the sound: no PulseAudio or PipeWire server is running. Start your sound server, then run "prezilla off" again."
   - "Couldn't change desktop icons: xfconf-query was not found. Prezilla needs an XFCE session." (the same for notifications and the wallpaper)
   - "Couldn't change the wallpaper: no image is set. Set "wallpaper" to an image path in config.json, or remove "wallpaper" from "switches"."
 - **"Another Prezilla action is still running. Wait a moment and try again."**: another `prezilla` command holds the state lock.
-- **"Prezilla's saved state (<path>) is unreadable, so it can't restore your settings automatically. Turn desktop icons, notifications, sound and windows back on by hand, then delete that file."**: the saved state file is damaged; restore the settings by hand as the sentence says, then delete that file.
+- **"Prezilla's saved state (<path>) is unreadable, so it can't restore your settings automatically. Turn desktop icons, notifications, sound and windows back on and set your wallpaper again by hand (the old wallpaper path may still be readable in that file), then delete that file."**: the saved state file is damaged; restore the settings by hand as the sentence says, then delete that file.
 - **"The configuration file (<path>) isn't valid JSON. Fix it, or delete it to use the defaults."**: `off`, `status`, `watch` and `tray` warn and continue with the defaults; `on` and `toggle` stop.
 - **No tray icon**: `prezilla tray` reports that no StatusNotifier host was found. Add the Status Notifier plugin to the panel, or use `prezilla toggle` from a shortcut or terminal.
 - **"Prezilla supports XFCE only (this session reports "<desktop>"). Run it inside an XFCE session."**: `XDG_CURRENT_DESKTOP` must contain `XFCE`.

@@ -18,7 +18,11 @@ func ResolveConfig(cmd string, cfg core.Config, loadErr error, errOut io.Writer)
 	}
 	switch cmd {
 	case "off", "status", "watch", "tray":
-		fmt.Fprintf(errOut, "warning: %s; using default configuration\n", usererr.Explain(loadErr))
+		if sentence, details := usererr.Split(loadErr); details != "" {
+			fmt.Fprintf(errOut, "warning: %s Prezilla is using the default configuration for now. (details: %s)\n", sentence, details)
+		} else {
+			fmt.Fprintf(errOut, "warning: %s; using default configuration\n", sentence)
+		}
 		return core.DefaultConfig(), nil
 	}
 	return core.Config{}, loadErr
