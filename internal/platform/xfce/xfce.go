@@ -19,7 +19,7 @@ func Switches(b system.Backends, cfg core.Config) []core.Switch {
 		case core.IDMute:
 			out = append(out, NewMute(b.Audio))
 		case core.IDMinimize:
-			out = append(out, NewMinimize(b.Runner))
+			out = append(out, NewMinimize(b.Windows))
 		case core.IDWallpaper:
 			out = append(out, NewWallpaper(b.Runner, cfg.Wallpaper))
 		}
@@ -35,7 +35,7 @@ func All(b system.Backends, cfg core.Config) []core.Switch {
 		NewIcons(b.Runner),
 		NewNotifications(b.Runner),
 		NewMute(b.Audio),
-		NewMinimize(b.Runner),
+		NewMinimize(b.Windows),
 		NewWallpaper(b.Runner, cfg.Wallpaper),
 	}
 }

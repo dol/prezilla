@@ -293,24 +293,26 @@ func TestMuteUnknownSinkFailsClosed(t *testing.T) {
 	noSetCall(t, f)
 }
 
-const wmGet = "env LC_ALL=C wmctrl -m"
-
 func TestMinimizeEnableShowsDesktopAndSavesState(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{wmGet: "Name: Xfwm4\nShowing the desktop: OFF"}}
+	f := &system.FakeWindows{}
 	sw := NewMinimize(f)
 	saved, err := sw.Enable(ctx)
 	if err != nil || saved != "off" {
 		t.Fatalf("got (%q, %v)", saved, err)
 	}
-	has(t, f, "wmctrl -k on")
+	if !slices.Contains(f.Calls, "SetShowingDesktop true") || !f.Showing {
+		t.Fatalf("calls %v showing %v", f.Calls, f.Showing)
+	}
 	if err := sw.Disable(ctx, saved); err != nil {
 		t.Fatal(err)
 	}
-	has(t, f, "wmctrl -k off")
+	if !slices.Contains(f.Calls, "SetShowingDesktop false") || f.Showing {
+		t.Fatalf("calls %v showing %v", f.Calls, f.Showing)
+	}
 }
 
 func TestMinimizeAlreadyShowingDesktopNotRestored(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{wmGet: "Name: Xfwm4\nShowing the desktop: ON"}}
+	f := &system.FakeWindows{Showing: true}
 	sw := NewMinimize(f)
 	saved, err := sw.Enable(ctx)
 	if err != nil || saved != "on" {
@@ -319,24 +321,41 @@ func TestMinimizeAlreadyShowingDesktopNotRestored(t *testing.T) {
 	if err := sw.Disable(ctx, saved); err != nil {
 		t.Fatal(err)
 	}
-	lacks(t, f, "wmctrl -k off")
-}
-
-func TestMinimizeMissingWmctrlErrorMentionsTool(t *testing.T) {
-	f := &system.FakeRunner{Err: map[string]error{wmGet: errors.New("not found")}}
-	_, err := NewMinimize(f).Enable(ctx)
-	if err == nil || !strings.Contains(err.Error(), "wmctrl") {
-		t.Fatalf("got %v", err)
+	if slices.Contains(f.Calls, "SetShowingDesktop false") || !f.Showing {
+		t.Fatalf("calls %v showing %v", f.Calls, f.Showing)
 	}
 }
 
-func TestMinimizeUnparsableOutputFailsClosed(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{wmGet: "Name: Xfwm4\nDesktop zeigen: AN"}}
+func TestMinimizeReadFailureFailsClosed(t *testing.T) {
+	f := &system.FakeWindows{GetErr: errors.New("x11: connect: boom")}
 	_, err := NewMinimize(f).Enable(ctx)
-	if err == nil || !strings.Contains(err.Error(), "wmctrl -m") {
+	if err == nil || !strings.Contains(err.Error(), "x11") {
 		t.Fatalf("got %v", err)
 	}
-	lacks(t, f, "wmctrl -k on")
+	for _, c := range f.Calls {
+		if strings.HasPrefix(c, "SetShowingDesktop") {
+			t.Fatalf("set called: %v", f.Calls)
+		}
+	}
+}
+
+func TestMinimizeSetFailureIsReported(t *testing.T) {
+	f := &system.FakeWindows{SetErr: errors.New("nope")}
+	if _, err := NewMinimize(f).Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestMinimizeDisableCorruptSavedIsNoop(t *testing.T) {
+	f := &system.FakeWindows{Showing: true}
+	for _, saved := range []string{"", "garbage", "ON"} {
+		if err := NewMinimize(f).Disable(ctx, saved); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("calls %v", f.Calls)
+	}
 }
 
 const (

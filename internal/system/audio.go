@@ -21,8 +21,9 @@ type Audio interface {
 
 // Backends bundles the system interfaces the platform switches use.
 type Backends struct {
-	Runner Runner
-	Audio  Audio
+	Runner  Runner
+	Audio   Audio
+	Windows Windows
 }
 
 // FakeAudio is an in-memory Audio for tests. Set the exported fields before

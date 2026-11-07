@@ -3,61 +3,38 @@ package xfce
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"prezilla/internal/core"
 	"prezilla/internal/system"
 )
 
-type minimize struct{ r system.Runner }
+type minimize struct{ w system.Windows }
 
 // NewMinimize shows the desktop (minimizes all windows) while presenting.
-func NewMinimize(r system.Runner) core.Switch { return minimize{r} }
+func NewMinimize(w system.Windows) core.Switch { return minimize{w} }
 
 func (minimize) ID() string { return core.IDMinimize }
 
 func (s minimize) Enable(ctx context.Context) (string, error) {
-	out, err := s.r.Run(ctx, "env", "LC_ALL=C", "wmctrl", "-m")
+	showing, err := s.w.ShowingDesktop(ctx)
 	if err != nil {
-		return "", fmt.Errorf("wmctrl -m: %w", err)
+		return "", fmt.Errorf("read showing desktop: %w", err)
 	}
-	saved, ok := parseShowingDesktop(out)
-	if !ok {
-		return "", fmt.Errorf("wmctrl -m: unexpected output %q", out)
+	if err := s.w.SetShowingDesktop(ctx, true); err != nil {
+		return "", fmt.Errorf("show desktop: %w", err)
 	}
-	if _, err := s.r.Run(ctx, "wmctrl", "-k", "on"); err != nil {
-		return "", fmt.Errorf("wmctrl -k on: %w", err)
+	if showing {
+		return "on", nil
 	}
-	return saved, nil
+	return "off", nil
 }
 
 func (s minimize) Disable(ctx context.Context, saved string) error {
 	if saved != "off" {
 		return nil
 	}
-	if _, err := s.r.Run(ctx, "wmctrl", "-k", "off"); err != nil {
-		return fmt.Errorf("wmctrl -k off: %w", err)
+	if err := s.w.SetShowingDesktop(ctx, false); err != nil {
+		return fmt.Errorf("restore desktop: %w", err)
 	}
 	return nil
-}
-
-// parseShowingDesktop finds the "Showing the desktop: ON|OFF" line.
-func parseShowingDesktop(out string) (string, bool) {
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(strings.ToLower(line), "showing the desktop") {
-			continue
-		}
-		i := strings.LastIndex(line, ":")
-		if i < 0 {
-			return "", false
-		}
-		switch strings.ToLower(strings.TrimSpace(line[i+1:])) {
-		case "on":
-			return "on", true
-		case "off":
-			return "off", true
-		}
-		return "", false
-	}
-	return "", false
 }
