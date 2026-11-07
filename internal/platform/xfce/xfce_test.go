@@ -3,6 +3,7 @@ package xfce
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -14,42 +15,53 @@ import (
 
 var ctx = context.Background()
 
-func has(t *testing.T, f *system.FakeRunner, call string) {
+func has(t *testing.T, f *system.FakeXfconf, call string) {
 	t.Helper()
 	if !slices.Contains(f.Calls, call) {
 		t.Fatalf("missing call %q in %v", call, f.Calls)
 	}
 }
 
-func lacks(t *testing.T, f *system.FakeRunner, call string) {
+func lacks(t *testing.T, f *system.FakeXfconf, call string) {
 	t.Helper()
 	if slices.Contains(f.Calls, call) {
 		t.Fatalf("unexpected call %q in %v", call, f.Calls)
 	}
 }
 
-const iconsProp = "xfconf-query -c xfce4-desktop -p /desktop-icons/style"
-const dndProp = "xfconf-query -c xfce4-notifyd -p /do-not-disturb"
+const (
+	iconsKey = "xfce4-desktop /desktop-icons/style"
+	dndKey   = "xfce4-notifyd /do-not-disturb"
+	presKey  = "xfce4-power-manager /xfce4-power-manager/presentation-mode"
+)
+
+func props(kv ...any) *system.FakeXfconf {
+	f := &system.FakeXfconf{Props: map[string]system.XfconfValue{}}
+	for i := 0; i < len(kv); i += 2 {
+		f.Props[kv[i].(string)] = kv[i+1].(system.XfconfValue)
+	}
+	return f
+}
 
 func TestIconsEnableHidesAndSavesPrevious(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{iconsProp: "2"}}
+	f := props(iconsKey, system.XfInt(2))
 	saved, err := NewIcons(f).Enable(ctx)
 	if err != nil || saved != "2" {
 		t.Fatalf("got (%q, %v)", saved, err)
 	}
-	has(t, f, iconsProp+" -n -t int -s 0")
+	has(t, f, "Set "+iconsKey+" int:0")
 }
 
 func TestIconsDisableRestoresPrevious(t *testing.T) {
-	f := &system.FakeRunner{}
+	f := props()
 	if err := NewIcons(f).Disable(ctx, "2"); err != nil {
 		t.Fatal(err)
 	}
-	has(t, f, iconsProp+" -n -t int -s 2")
+	has(t, f, "Set "+iconsKey+" int:2")
 }
 
 func TestIconsUnsetPropertyIsRemovedOnRestore(t *testing.T) {
-	f := &system.FakeRunner{Err: map[string]error{iconsProp: errors.New("unset")}}
+	f := props()
 	sw := NewIcons(f)
 	saved, err := sw.Enable(ctx)
 	if err != nil || saved != "" {
@@ -58,30 +70,224 @@ func TestIconsUnsetPropertyIsRemovedOnRestore(t *testing.T) {
 	if err := sw.Disable(ctx, saved); err != nil {
 		t.Fatal(err)
 	}
-	has(t, f, iconsProp+" -r")
+	has(t, f, "Reset "+iconsKey)
+	if _, ok := f.Props[iconsKey]; ok {
+		t.Fatal("property left set")
+	}
+}
+
+func TestIconsReadFailureFailsClosed(t *testing.T) {
+	f := props()
+	f.Err = map[string]error{"Get " + iconsKey: errors.New("no daemon")}
+	if _, err := NewIcons(f).Enable(ctx); err == nil || !strings.HasPrefix(err.Error(), "read icon style: ") {
+		t.Fatalf("got %v", err)
+	}
+	lacks(t, f, "Set "+iconsKey+" int:0")
+}
+
+func TestIconsSetFailureIsReported(t *testing.T) {
+	f := props(iconsKey, system.XfInt(1))
+	f.Err = map[string]error{"Set " + iconsKey + " int:0": errors.New("boom")}
+	if _, err := NewIcons(f).Enable(ctx); err == nil || !strings.HasPrefix(err.Error(), "hide icons: ") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestIconsDisableStrictSavedValue(t *testing.T) {
+	for _, saved := range []string{"x", "1.5", "99999999999", "-"} {
+		f := props()
+		if err := NewIcons(f).Disable(ctx, saved); err == nil {
+			t.Errorf("%q accepted", saved)
+		}
+		if len(f.Calls) != 0 {
+			t.Errorf("%q: calls %v", saved, f.Calls)
+		}
+	}
 }
 
 func TestNotificationsAlreadyDNDStaysDNDAfterDisable(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{dndProp: "true"}}
+	f := props(dndKey, system.XfBool(true))
 	sw := NewNotifications(f)
 	saved, err := sw.Enable(ctx)
 	if err != nil || saved != "true" {
 		t.Fatalf("got (%q, %v)", saved, err)
 	}
-	has(t, f, dndProp+" -n -t bool -s true")
+	has(t, f, "Set "+dndKey+" bool:true")
 	if err := sw.Disable(ctx, saved); err != nil {
 		t.Fatal(err)
 	}
-	if f.Calls[len(f.Calls)-1] != dndProp+" -n -t bool -s true" {
+	if f.Calls[len(f.Calls)-1] != "Set "+dndKey+" bool:true" {
 		t.Fatalf("calls %v", f.Calls)
 	}
 }
 
-func TestNotificationsUnreadableDefaultsToFalse(t *testing.T) {
-	f := &system.FakeRunner{Err: map[string]error{dndProp: errors.New("unset")}}
-	saved, err := NewNotifications(f).Enable(ctx)
+func TestNotificationsUnsetDefaultsToFalse(t *testing.T) {
+	f := props()
+	sw := NewNotifications(f)
+	saved, err := sw.Enable(ctx)
 	if err != nil || saved != "false" {
 		t.Fatalf("got (%q, %v)", saved, err)
+	}
+	if err := sw.Disable(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.Props[dndKey]; v != system.XfBool(false) {
+		t.Fatalf("got %+v", v)
+	}
+}
+
+func TestNotificationsReadFailureFailsClosed(t *testing.T) {
+	f := props()
+	f.Err = map[string]error{"Get " + dndKey: errors.New("no daemon")}
+	if _, err := NewNotifications(f).Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	lacks(t, f, "Set "+dndKey+" bool:true")
+}
+
+func TestNotificationsDisableStrictSavedValue(t *testing.T) {
+	for _, saved := range []string{"", "on", "TRUE", "1"} {
+		f := props()
+		if err := NewNotifications(f).Disable(ctx, saved); err == nil {
+			t.Errorf("%q accepted", saved)
+		}
+		if len(f.Calls) != 0 {
+			t.Errorf("%q: calls %v", saved, f.Calls)
+		}
+	}
+}
+
+func TestPresentationSavesAndRestoresEachPreviousState(t *testing.T) {
+	cases := []struct {
+		name  string
+		f     *system.FakeXfconf
+		saved string
+		after string // call expected on Disable
+	}{
+		{"unset", props(), "unset", "Reset " + presKey},
+		{"false", props(presKey, system.XfBool(false)), "false", "Set " + presKey + " bool:false"},
+		{"true", props(presKey, system.XfBool(true)), "true", "Set " + presKey + " bool:true"},
+	}
+	for _, c := range cases {
+		sw := NewPresentation(c.f)
+		saved, err := sw.Enable(ctx)
+		if err != nil || saved != c.saved {
+			t.Fatalf("%s: got (%q, %v)", c.name, saved, err)
+		}
+		if v := c.f.Props[presKey]; v != system.XfBool(true) {
+			t.Fatalf("%s: enable left %+v", c.name, v)
+		}
+		if err := sw.Disable(ctx, saved); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := c.f.Calls[len(c.f.Calls)-1]; got != c.after {
+			t.Errorf("%s: last call %q want %q", c.name, got, c.after)
+		}
+	}
+}
+
+func TestPresentationRestoredStateMatchesOriginal(t *testing.T) {
+	f := props(presKey, system.XfBool(false))
+	sw := NewPresentation(f)
+	saved, _ := sw.Enable(ctx)
+	_ = sw.Disable(ctx, saved)
+	if v := f.Props[presKey]; v != system.XfBool(false) {
+		t.Fatalf("got %+v", v)
+	}
+	g := props()
+	saved, _ = NewPresentation(g).Enable(ctx)
+	_ = NewPresentation(g).Disable(ctx, saved)
+	if _, ok := g.Props[presKey]; ok {
+		t.Fatal("unset property was not reset")
+	}
+}
+
+func TestPresentationReadFailureFailsClosed(t *testing.T) {
+	f := props()
+	f.Err = map[string]error{"Get " + presKey: errors.New("no daemon")}
+	if _, err := NewPresentation(f).Enable(ctx); err == nil || !strings.HasPrefix(err.Error(), "read presentation mode: ") {
+		t.Fatalf("got %v", err)
+	}
+	lacks(t, f, "Set "+presKey+" bool:true")
+}
+
+func TestPresentationUnexpectedTypeFailsClosed(t *testing.T) {
+	f := props(presKey, system.XfString("yes"))
+	if _, err := NewPresentation(f).Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	lacks(t, f, "Set "+presKey+" bool:true")
+}
+
+func TestPresentationSetFailureIsReported(t *testing.T) {
+	f := props()
+	f.Err = map[string]error{"Set " + presKey + " bool:true": errors.New("boom")}
+	if _, err := NewPresentation(f).Enable(ctx); err == nil || !strings.HasPrefix(err.Error(), "set presentation mode: ") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPresentationDisableStrictSavedValue(t *testing.T) {
+	for _, saved := range []string{"", "on", "TRUE", "Unset"} {
+		f := props()
+		if err := NewPresentation(f).Disable(ctx, saved); err == nil {
+			t.Errorf("%q accepted", saved)
+		}
+		if len(f.Calls) != 0 {
+			t.Errorf("%q: calls %v", saved, f.Calls)
+		}
+	}
+}
+
+func TestPresentationEngineRoundTrip(t *testing.T) {
+	f := props(presKey, system.XfBool(false))
+	eng := core.NewEngine([]core.Switch{NewPresentation(f)}, core.NewStore(t.TempDir()+"/state.json"), time.Now)
+	if err := eng.Enable(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.Props[presKey]; v != system.XfBool(true) {
+		t.Fatalf("not enabled: %+v", v)
+	}
+	if err := eng.Disable(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.Props[presKey]; v != system.XfBool(false) {
+		t.Fatalf("not restored: %+v", v)
+	}
+}
+
+func TestPresentationEngineRollsBackWhenStateCannotBeSaved(t *testing.T) {
+	blocker := t.TempDir() + "/file"
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := props()
+	eng := core.NewEngine([]core.Switch{NewPresentation(f)}, core.NewStore(blocker+"/state.json"), time.Now)
+	if err := eng.Enable(ctx, 0); err == nil {
+		t.Fatal("expected error")
+	}
+	if _, ok := f.Props[presKey]; ok {
+		t.Fatal("unset property was not reset by the rollback")
+	}
+}
+
+func TestPresentationSetFailureTriggersCorrectiveRestore(t *testing.T) {
+	f := props(presKey, system.XfBool(false))
+	f.Err = map[string]error{"Set " + presKey + " bool:true": errors.New("boom")}
+	if _, err := NewPresentation(f).Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	has(t, f, "Set "+presKey+" bool:false")
+}
+
+func TestPresentationSetFailureWhenAlreadyOnHasNoCorrection(t *testing.T) {
+	f := props(presKey, system.XfBool(true))
+	f.Err = map[string]error{"Set " + presKey + " bool:true": errors.New("boom")}
+	if _, err := NewPresentation(f).Enable(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	if len(f.Calls) != 2 {
+		t.Fatalf("calls %v", f.Calls)
 	}
 }
 
@@ -404,19 +610,21 @@ func TestMinimizeDisableCorruptSavedIsNoop(t *testing.T) {
 }
 
 const (
-	wpList = "xfconf-query -c xfce4-desktop -l"
-	wpA    = "/backdrop/screen0/monitor0/workspace0/last-image"
-	wpB    = "/backdrop/screen0/monitor1/workspace0/last-image"
-	wpGet  = "xfconf-query -c xfce4-desktop -p "
+	wpA = "/backdrop/screen0/monitor0/workspace0/last-image"
+	wpB = "/backdrop/screen0/monitor1/workspace0/last-image"
+	dsk = "xfce4-desktop "
 )
 
-func wpFake() *system.FakeRunner {
-	return &system.FakeRunner{Out: map[string]string{
-		wpList:      wpA + "\n" + wpB + "\n/desktop-icons/style",
-		wpGet + wpA: "/img/a.png",
-		wpGet + wpB: "/img/b.png",
-	}}
+func wpFake() *system.FakeXfconf {
+	return props(
+		dsk+wpA, system.XfString("/img/a.png"),
+		dsk+wpB, system.XfString("/img/b.png"),
+		dsk+"/backdrop/screen0/monitor0/workspace0/image-style", system.XfInt(5),
+		dsk+"/desktop-icons/style", system.XfInt(2),
+	)
 }
+
+func setS(prop, v string) string { return "Set " + dsk + prop + " string:" + v }
 
 func TestWallpaperChangesEveryMonitorAndWorkspaceProperty(t *testing.T) {
 	f := wpFake()
@@ -424,9 +632,20 @@ func TestWallpaperChangesEveryMonitorAndWorkspaceProperty(t *testing.T) {
 	if err != nil || saved == "" {
 		t.Fatalf("got (%q, %v)", saved, err)
 	}
-	has(t, f, wpGet+wpA+" -s /img/pres.png")
-	has(t, f, wpGet+wpB+" -s /img/pres.png")
-	lacks(t, f, wpGet+"/desktop-icons/style -s /img/pres.png")
+	has(t, f, setS(wpA, "/img/pres.png"))
+	has(t, f, setS(wpB, "/img/pres.png"))
+	lacks(t, f, setS("/desktop-icons/style", "/img/pres.png"))
+	if f.Props[dsk+"/backdrop/screen0/monitor0/workspace0/image-style"] != system.XfInt(5) {
+		t.Error("other backdrop property touched")
+	}
+}
+
+func TestWallpaperSavedStateIsJSONOfOriginals(t *testing.T) {
+	saved, err := NewWallpaper(wpFake(), "/img/pres.png").Enable(ctx)
+	want := `{"` + wpA + `":"/img/a.png","` + wpB + `":"/img/b.png"}`
+	if err != nil || saved != want {
+		t.Fatalf("got (%q, %v) want %q", saved, err, want)
+	}
 }
 
 func TestWallpaperDisableRestoresEachOriginal(t *testing.T) {
@@ -439,74 +658,76 @@ func TestWallpaperDisableRestoresEachOriginal(t *testing.T) {
 	if err := sw.Disable(ctx, saved); err != nil {
 		t.Fatal(err)
 	}
-	has(t, f, wpGet+wpA+" -s /img/a.png")
-	has(t, f, wpGet+wpB+" -s /img/b.png")
+	has(t, f, setS(wpA, "/img/a.png"))
+	has(t, f, setS(wpB, "/img/b.png"))
 }
 
 func TestWallpaperDisableContinuesAfterFailure(t *testing.T) {
 	f := wpFake()
 	sw := NewWallpaper(f, "/img/pres.png")
 	saved, _ := sw.Enable(ctx)
-	f.Err = map[string]error{wpGet + wpA + " -s /img/a.png": errors.New("boom")}
+	f.Err = map[string]error{setS(wpA, "/img/a.png"): errors.New("boom")}
 	err := sw.Disable(ctx, saved)
 	if err == nil || !strings.Contains(err.Error(), wpA) {
 		t.Fatalf("got %v", err)
 	}
-	has(t, f, wpGet+wpB+" -s /img/b.png")
+	has(t, f, setS(wpB, "/img/b.png"))
 }
 
 func TestWallpaperDisableBadSavedErrors(t *testing.T) {
-	if err := NewWallpaper(&system.FakeRunner{}, "x").Disable(ctx, "not json"); err == nil {
+	if err := NewWallpaper(&system.FakeXfconf{}, "x").Disable(ctx, "not json"); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestWallpaperNoPropertiesErrors(t *testing.T) {
-	f := &system.FakeRunner{Out: map[string]string{wpList: "/desktop-icons/style"}}
+	f := props(dsk+"/desktop-icons/style", system.XfInt(2))
 	_, err := NewWallpaper(f, "x").Enable(ctx)
 	if err == nil || !strings.Contains(err.Error(), "no wallpaper properties found") {
 		t.Fatalf("got %v", err)
 	}
 }
 
+func TestWallpaperListFailureIsReported(t *testing.T) {
+	f := wpFake()
+	f.Err = map[string]error{"List " + dsk + "/backdrop": errors.New("no daemon")}
+	if _, err := NewWallpaper(f, "x").Enable(ctx); err == nil || !strings.HasPrefix(err.Error(), "list wallpapers: ") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestWallpaperEnableSetFailureRollsBackIncludingFailingProp(t *testing.T) {
 	wpC := "/backdrop/screen0/monitor2/workspace0/last-image"
-	f := &system.FakeRunner{
-		Out: map[string]string{
-			wpList:      wpA + "\n" + wpB + "\n" + wpC,
-			wpGet + wpA: "/img/a.png",
-			wpGet + wpB: "/img/b.png",
-			wpGet + wpC: "/img/c.png",
-		},
-		Err: map[string]error{wpGet + wpB + " -s /img/pres.png": errors.New("boom")},
-	}
+	f := wpFake()
+	f.Props[dsk+wpC] = system.XfString("/img/c.png")
+	f.Err = map[string]error{setS(wpB, "/img/pres.png"): errors.New("boom")}
 	if _, err := NewWallpaper(f, "/img/pres.png").Enable(ctx); err == nil {
 		t.Fatal("expected error")
 	}
-	has(t, f, wpGet+wpA+" -s /img/a.png")
-	has(t, f, wpGet+wpB+" -s /img/b.png")
-	lacks(t, f, wpGet+wpC+" -s /img/pres.png")
+	has(t, f, setS(wpA, "/img/a.png"))
+	has(t, f, setS(wpB, "/img/b.png"))
+	lacks(t, f, setS(wpC, "/img/pres.png"))
 }
 
 func TestWallpaperEmptyOriginalIsSkipped(t *testing.T) {
 	f := wpFake()
-	f.Out[wpGet+wpB] = ""
+	f.Props[dsk+wpB] = system.XfString("")
 	sw := NewWallpaper(f, "/img/pres.png")
 	saved, err := sw.Enable(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	has(t, f, wpGet+wpA+" -s /img/pres.png")
-	lacks(t, f, wpGet+wpB+" -s /img/pres.png")
+	has(t, f, setS(wpA, "/img/pres.png"))
+	lacks(t, f, setS(wpB, "/img/pres.png"))
 	if strings.Contains(saved, wpB) {
 		t.Fatalf("saved %q contains empty prop", saved)
 	}
 	if err := sw.Disable(ctx, saved); err != nil {
 		t.Fatal(err)
 	}
-	has(t, f, wpGet+wpA+" -s /img/a.png")
+	has(t, f, setS(wpA, "/img/a.png"))
 	for _, c := range f.Calls {
-		if strings.HasPrefix(c, wpGet+wpB+" -s") {
+		if strings.HasPrefix(c, "Set "+dsk+wpB) {
 			t.Fatalf("empty prop was set: %q", c)
 		}
 	}

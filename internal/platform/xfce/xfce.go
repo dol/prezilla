@@ -13,29 +13,32 @@ func Switches(b system.Backends, cfg core.Config) []core.Switch {
 	for _, id := range cfg.Switches {
 		switch id {
 		case core.IDIcons:
-			out = append(out, NewIcons(b.Runner))
+			out = append(out, NewIcons(b.Xfconf))
 		case core.IDNotifications:
-			out = append(out, NewNotifications(b.Runner))
+			out = append(out, NewNotifications(b.Xfconf))
+		case core.IDPresentation:
+			out = append(out, NewPresentation(b.Xfconf))
 		case core.IDMute:
 			out = append(out, NewMute(b.Audio))
 		case core.IDMinimize:
 			out = append(out, NewMinimize(b.Windows))
 		case core.IDWallpaper:
-			out = append(out, NewWallpaper(b.Runner, cfg.Wallpaper))
+			out = append(out, NewWallpaper(b.Xfconf, cfg.Wallpaper))
 		}
 	}
 	return out
 }
 
-// All builds every known switch in a fixed order (icons, notifications, mute,
+// All builds every known switch in a fixed order (icons, notifications, presentation, mute,
 // minimize, wallpaper). The wallpaper switch uses cfg.Wallpaper; its Disable
 // restores from the saved value and does not need the image.
 func All(b system.Backends, cfg core.Config) []core.Switch {
 	return []core.Switch{
-		NewIcons(b.Runner),
-		NewNotifications(b.Runner),
+		NewIcons(b.Xfconf),
+		NewNotifications(b.Xfconf),
+		NewPresentation(b.Xfconf),
 		NewMute(b.Audio),
 		NewMinimize(b.Windows),
-		NewWallpaper(b.Runner, cfg.Wallpaper),
+		NewWallpaper(b.Xfconf, cfg.Wallpaper),
 	}
 }

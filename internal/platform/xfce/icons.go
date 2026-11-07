@@ -3,32 +3,54 @@ package xfce
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 
 	"prezilla/internal/core"
 	"prezilla/internal/system"
 )
 
-type icons struct{ r system.Runner }
+const (
+	desktopChannel = "xfce4-desktop"
+	iconsProp      = "/desktop-icons/style"
+)
+
+type icons struct{ x system.Xfconf }
 
 // NewIcons hides desktop icons while presenting.
-func NewIcons(r system.Runner) core.Switch { return icons{r} }
+func NewIcons(x system.Xfconf) core.Switch { return icons{x} }
 
 func (icons) ID() string { return core.IDIcons }
 
+// Enable saves the previous style as a decimal number, or "" when unset.
 func (s icons) Enable(ctx context.Context) (string, error) {
-	saved, err := s.r.Run(ctx, "xfconf-query", "-c", "xfce4-desktop", "-p", "/desktop-icons/style")
+	v, ok, err := s.x.Get(ctx, desktopChannel, iconsProp)
 	if err != nil {
-		saved = "" // property unset
+		return "", fmt.Errorf("read icon style: %w", err)
 	}
-	_, err = s.r.Run(ctx, "xfconf-query", "-c", "xfce4-desktop", "-p", "/desktop-icons/style", "-n", "-t", "int", "-s", "0")
-	return saved, err
+	saved := ""
+	if ok {
+		saved = v.String()
+	}
+	if err := s.x.Set(ctx, desktopChannel, iconsProp, system.XfInt(0)); err != nil {
+		return saved, fmt.Errorf("hide icons: %w", err)
+	}
+	return saved, nil
 }
 
 func (s icons) Disable(ctx context.Context, saved string) error {
 	if saved == "" {
-		_, err := s.r.Run(ctx, "xfconf-query", "-c", "xfce4-desktop", "-p", "/desktop-icons/style", "-r")
-		return err
+		if err := s.x.Reset(ctx, desktopChannel, iconsProp); err != nil {
+			return fmt.Errorf("restore icon style: %w", err)
+		}
+		return nil
 	}
-	_, err := s.r.Run(ctx, "xfconf-query", "-c", "xfce4-desktop", "-p", "/desktop-icons/style", "-n", "-t", "int", "-s", saved)
-	return err
+	n, err := strconv.ParseInt(saved, 10, 32)
+	if err != nil {
+		return fmt.Errorf("restore icon style: invalid saved value %q", saved)
+	}
+	if err := s.x.Set(ctx, desktopChannel, iconsProp, system.XfInt(int32(n))); err != nil {
+		return fmt.Errorf("restore icon style: %w", err)
+	}
+	return nil
 }

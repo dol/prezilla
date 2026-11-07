@@ -21,7 +21,7 @@ type Config struct {
 // DefaultConfig enables every switch except wallpaper, with a 30 minute timeout.
 func DefaultConfig() Config {
 	return Config{
-		Switches:       []string{IDIcons, IDNotifications, IDMute, IDMinimize},
+		Switches:       []string{IDIcons, IDNotifications, IDPresentation, IDMute, IDMinimize},
 		TimeoutMinutes: 30,
 	}
 }

@@ -7,6 +7,7 @@ import "context"
 const (
 	IDIcons         = "icons"
 	IDNotifications = "notifications"
+	IDPresentation  = "presentation"
 	IDMute          = "mute"
 	IDMinimize      = "minimize"
 	IDWallpaper     = "wallpaper"

@@ -57,3 +57,10 @@ func TestLoadConfigNegativeTimeoutNamesPath(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestDefaultConfigSwitchOrderHasPresentationAfterNotifications(t *testing.T) {
+	want := []string{IDIcons, IDNotifications, IDPresentation, IDMute, IDMinimize}
+	if got := DefaultConfig().Switches; !reflect.DeepEqual(got, want) {
+		t.Fatalf("switches = %v, want %v", got, want)
+	}
+}

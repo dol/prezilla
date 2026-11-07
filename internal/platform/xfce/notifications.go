@@ -2,31 +2,46 @@ package xfce
 
 import (
 	"context"
+	"fmt"
 
 	"prezilla/internal/core"
 	"prezilla/internal/system"
 )
 
-type notifications struct{ r system.Runner }
+const (
+	notifyChannel = "xfce4-notifyd"
+	dndProp       = "/do-not-disturb"
+)
+
+type notifications struct{ x system.Xfconf }
 
 // NewNotifications enables do-not-disturb while presenting.
-func NewNotifications(r system.Runner) core.Switch { return notifications{r} }
+func NewNotifications(x system.Xfconf) core.Switch { return notifications{x} }
 
 func (notifications) ID() string { return core.IDNotifications }
 
-func (s notifications) set(ctx context.Context, v string) error {
-	_, err := s.r.Run(ctx, "xfconf-query", "-c", "xfce4-notifyd", "-p", "/do-not-disturb", "-n", "-t", "bool", "-s", v)
-	return err
-}
-
+// Enable saves the previous value as "true" or "false" ("false" when unset).
 func (s notifications) Enable(ctx context.Context) (string, error) {
-	saved, err := s.r.Run(ctx, "xfconf-query", "-c", "xfce4-notifyd", "-p", "/do-not-disturb")
+	saved := "false"
+	v, ok, err := s.x.Get(ctx, notifyChannel, dndProp)
 	if err != nil {
-		saved = "false"
+		return "", fmt.Errorf("read do-not-disturb: %w", err)
 	}
-	return saved, s.set(ctx, "true")
+	if ok {
+		saved = v.String()
+	}
+	if err := s.x.Set(ctx, notifyChannel, dndProp, system.XfBool(true)); err != nil {
+		return saved, fmt.Errorf("set do-not-disturb: %w", err)
+	}
+	return saved, nil
 }
 
 func (s notifications) Disable(ctx context.Context, saved string) error {
-	return s.set(ctx, saved)
+	if saved != "true" && saved != "false" {
+		return fmt.Errorf("restore do-not-disturb: invalid saved value %q", saved)
+	}
+	if err := s.x.Set(ctx, notifyChannel, dndProp, system.XfBool(saved == "true")); err != nil {
+		return fmt.Errorf("restore do-not-disturb: %w", err)
+	}
+	return nil
 }
