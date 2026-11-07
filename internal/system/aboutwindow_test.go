@@ -133,8 +133,9 @@ func TestZenityAboutOpenerFailureIsWebsiteError(t *testing.T) {
 	o.Err = errors.New("open: xdg-open failed")
 	err := z.Show(context.Background(), about.New("1.2.3"))
 	var we *WebsiteError
-	if !errors.As(err, &we) || !strings.Contains(err.Error(), "xdg-open failed") {
-		t.Errorf("got %v, want a WebsiteError naming the cause", err)
+	want := "about: could not open https://github.com/dol/prezilla: open: xdg-open failed"
+	if !errors.As(err, &we) || err.Error() != want {
+		t.Errorf("got %v, want a WebsiteError %q", err, want)
 	}
 }
 
@@ -210,7 +211,33 @@ func TestAboutMarkupLinkOnlyForHTTP(t *testing.T) {
 }
 
 func TestEscapeMarkup(t *testing.T) {
-	if got := escapeMarkup(`a&<>"'b`); got != "a&amp;&lt;&gt;&quot;&apos;b" {
-		t.Errorf("got %q", got)
+	cases := map[string]string{
+		`a&<>"'b`:   "a&amp;&lt;&gt;&quot;&apos;b",
+		`\074b\076`: `\\074b\\076`,
+		`a\nb\tc`:   `a\\nb\\tc`,
+		`\\`:        `\\\\`,
+		`\&\<`:      `\\&amp;\\&lt;`, // single pass: entities are not escaped again
+		"&amp;":     "&amp;amp;",
+	}
+	for in, want := range cases {
+		if got := escapeMarkup(in); got != want {
+			t.Errorf("escapeMarkup(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAboutMarkupHostileBackslashVersion(t *testing.T) {
+	got := aboutMarkup(about.New("1<b>x</b>&\"'\\074i\\076"))
+	want := "<b>prezilla</b> 1&lt;b&gt;x&lt;/b&gt;&amp;&quot;&apos;\\\\074i\\\\076\n"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("markup %q, want prefix %q", got, want)
+	}
+}
+
+func TestWebsiteErrorNamesURL(t *testing.T) {
+	r := &FakeRunner{Out: map[string]string{"zenity --version": "4.2.1"}}
+	err := ZenityAbout{Runner: r}.Show(context.Background(), about.New("1"))
+	if err == nil || err.Error() != "about: could not open https://github.com/dol/prezilla: no opener configured" {
+		t.Errorf("got %v", err)
 	}
 }

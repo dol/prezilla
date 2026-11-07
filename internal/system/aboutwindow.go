@@ -22,10 +22,16 @@ var ErrNoZenity = errors.New("about: zenity not found")
 
 // WebsiteError reports that the user chose "Open website" but the opener
 // failed. The window itself worked, so callers show the error instead of
-// falling back to the notification.
-type WebsiteError struct{ Err error }
+// falling back to the notification. The message names the URL, so the user
+// can still copy the address when no opener works.
+type WebsiteError struct {
+	URL string
+	Err error
+}
 
-func (e *WebsiteError) Error() string { return "about: open website: " + e.Err.Error() }
+func (e *WebsiteError) Error() string {
+	return "about: could not open " + e.URL + ": " + e.Err.Error()
+}
 func (e *WebsiteError) Unwrap() error { return e.Err }
 
 // ZenityAbout shows the About window with zenity (an optional runtime tool).
@@ -73,10 +79,10 @@ func (z ZenityAbout) Show(ctx context.Context, info about.Info) error {
 		return fmt.Errorf("about: %w", err)
 	}
 	if z.Opener == nil {
-		return &WebsiteError{Err: errors.New("no opener configured")}
+		return &WebsiteError{URL: info.Website, Err: errors.New("no opener configured")}
 	}
 	if err := z.Opener.Open(ctx, info.Website); err != nil {
-		return &WebsiteError{Err: err}
+		return &WebsiteError{URL: info.Website, Err: err}
 	}
 	return nil
 }
@@ -108,9 +114,15 @@ func zenityArgs(major int, info about.Info) []string {
 		"--text=" + aboutMarkup(info)}
 }
 
-var markupEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
+// markupEscaper escapes in one pass, so the entities it writes are never
+// escaped again. zenity runs --text through g_strcompress after this, which
+// would decode \n, \t or \074 (<) and undo the Pango escaping; doubling the
+// backslash makes g_strcompress turn it back into one literal backslash.
+var markupEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;",
+	`\`, `\\`)
 
-// escapeMarkup escapes s for Pango markup (text and attribute values).
+// escapeMarkup escapes s for Pango markup (text and attribute values) as
+// zenity's --text needs it: g_strcompress first, then Pango.
 func escapeMarkup(s string) string { return markupEscaper.Replace(s) }
 
 // aboutMarkup renders the window text. Every value is escaped; the website
