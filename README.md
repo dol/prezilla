@@ -1,4 +1,4 @@
-# prezilla
+# Prezilla
 
 Presentation mode for your desktop: one click (or one command) hides desktop
 icons, silences notifications and audio, shows the desktop, and puts everything
@@ -19,7 +19,7 @@ back when you are done. XFCE on X11 first; other desktops are planned.
 - An XFCE session on X11 (Wayland is not supported); `xfconf-query` comes with it
 - For the tray: a panel with the Status Notifier plugin (the CLI works without it)
 
-Optional: `zenity` for the tray's **About prezilla** window (the `.deb` and `.rpm` packages recommend it). Without it, About shows a notification instead. No other packages are needed. Mute talks to PulseAudio/PipeWire-pulse over its native protocol, and show-desktop sets the EWMH `_NET_SHOWING_DESKTOP` property directly. The PulseAudio server is found via `PULSE_SERVER` or `$XDG_RUNTIME_DIR/pulse/native`; `default-server` in `client.conf` is not read.
+Optional: `zenity` for the tray's **About Prezilla** window (the `.deb` and `.rpm` packages recommend it). Without it, About shows a notification instead. No other packages are needed. Mute talks to PulseAudio/PipeWire-pulse over its native protocol, and show-desktop sets the EWMH `_NET_SHOWING_DESKTOP` property directly. The PulseAudio server is found via `PULSE_SERVER` or `$XDG_RUNTIME_DIR/pulse/native`; `default-server` in `client.conf` is not read.
 
 ## Installation
 
@@ -74,7 +74,7 @@ prezilla version
   - **Presentation mode**, a checkbox that is ticked while the mode is on; clicking it toggles the mode, exactly like a left click on the icon.
   - A greyed-out timer entry such as `Ends 15:04 · 12 min left`, only while a deadline is set, refreshed every 2 seconds; the tooltip keeps `, N min left`.
   - **Reset timer to 30 min**: the end time becomes 30 minutes from now (the configured timeout; 30 minutes when `timeout_minutes` is 0). It does not add to the time left, and a later end time (for example from `on --for 2h`) is kept, so the entry is shown only while less than 30 minutes are left and no screensaver question is open. The running watcher picks up the new end time.
-  - **About prezilla** opens a small window with the version, license, the project link and a **Close** button. The link is meant to open the project page in your default browser through the toolkit's own link handling; this has not been click-tested yet. Clicking About again while the window is open does nothing; Quit closes it. The window is drawn by `zenity`, which since version 4 uses GTK4/libadwaita, so it has the GNOME look rather than your XFCE theme. `zenity` is optional: without it, or if it fails, About shows version, license and the website URL as text in a desktop notification instead, which presentation mode's do-not-disturb may hide while the mode is on.
+  - **About Prezilla** opens a small window with the version, license, the project link and a **Close** button. The link is meant to open the project page in your default browser through the toolkit's own link handling; this has not been click-tested yet. Clicking About again while the window is open does nothing; Quit closes it. The window is drawn by `zenity`, which since version 4 uses GTK4/libadwaita, so it has the GNOME look rather than your XFCE theme. `zenity` is optional: without it, or if it fails, About shows version, license and the website URL as text in a desktop notification instead, which presentation mode's do-not-disturb may hide while the mode is on.
   - **Quit** closes the tray icon and leaves presentation mode as it is.
 
   Errors from toggling, **Reset timer** and **About** appear in the tooltip and on stderr.

@@ -59,6 +59,6 @@ jobs:
           prerelease=""
           case "${VERSION}" in *-*) prerelease="--prerelease" ;; esac
           gh release create "${GITHUB_REF_NAME}" ${prerelease} \
-            --title "prezilla ${VERSION}" \
+            --title "Prezilla ${VERSION}" \
             --notes-file release-notes.md \
             dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.tar.gz

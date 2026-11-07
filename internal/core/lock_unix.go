@@ -36,7 +36,7 @@ func (s *Store) Lock() (unlock func(), err error) {
 		}
 		if !time.Now().Before(deadline) {
 			f.Close()
-			return nil, fmt.Errorf("lock %s: timed out after %s waiting for another prezilla process", lockPath, s.lockTimeout)
+			return nil, fmt.Errorf("lock %s: timed out after %s waiting for another Prezilla process", lockPath, s.lockTimeout)
 		}
 		time.Sleep(lockPollInterval)
 	}

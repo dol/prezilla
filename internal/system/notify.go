@@ -57,7 +57,7 @@ func (n DBusNotifier) Notify(parent context.Context, summary, body, iconName str
 		}
 		call := conn.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications").
 			CallWithContext(ctx, "org.freedesktop.Notifications.Notify", 0,
-				"prezilla", uint32(0), iconName, summary, body,
+				"Prezilla", uint32(0), iconName, summary, body,
 				[]string{}, map[string]dbus.Variant{}, int32(notifyExpireMillis))
 		if call.Err != nil {
 			ch <- fmt.Errorf("notify: send: %w", call.Err)

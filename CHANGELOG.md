@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to prezilla are documented in this file.
+All notable changes to Prezilla are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - `prezilla` CLI: `on`, `off`, `toggle`, `status` and `version`.
 - `prezilla about` prints version, license and website.
-- Tray menu entry "About prezilla": a small window (via the optional `zenity`) with the project link and a "Close" button; without `zenity`, or if it fails, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity`.
+- Tray menu entry "About Prezilla": a small window (via the optional `zenity`) with the project link and a "Close" button; without `zenity`, or if it fails, a desktop notification with the website URL as text. The `.deb` and `.rpm` packages recommend `zenity`.
 - System tray front-end (`prezilla tray`) with an autostart entry.
 - Tray timer entry showing when presentation mode ends and the minutes left, with a "Reset timer to N min" entry below it while less than N minutes are left (the end time becomes N minutes from now; a later one is kept).
 - Left-click on the tray icon toggles presentation mode; the menu shows a "Presentation mode" checkbox instead of a state label. Toggle clicks within 500 ms of an accepted toggle are ignored, so a double click does not flip the mode twice.
@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - GitHub Actions CI and release workflows.
 
 ### Changed
+- The product is written "Prezilla" in all user-visible text (About window, tray, notifications, desktop entry); the command, package and paths stay `prezilla`.
 - Tray icons tell the state by shape, not only hue: an outlined grey (`#7A7A7A`) screen while off and a filled green (`#1A9B4A`) screen while presenting, both at least 3:1 against light and dark panels.
 - Tray wording: "N min left" keeps its number and unit together (non-breaking space); the tooltip line while the screensaver question is open reads "Screensaver started. Keep presenting?".
 - Mute and show-desktop no longer need external audio or window-manager tools: they use native PulseAudio and EWMH clients, and packages no longer recommend those tools.

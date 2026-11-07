@@ -110,7 +110,7 @@ func (d DBusPrompter) Ask(ctx context.Context, p Prompt) (string, error) {
 	defer sendCancel()
 	var id uint32
 	err = obj.CallWithContext(sendCtx, notifyIface+".Notify", 0,
-		"prezilla", uint32(0), p.IconName, p.Summary, p.Body,
+		"Prezilla", uint32(0), p.IconName, p.Summary, p.Body,
 		promptActions(p), promptHints(), int32(0)).Store(&id)
 	if err != nil {
 		if sendCtx.Err() != nil {

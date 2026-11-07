@@ -17,11 +17,11 @@ type exitErr int
 func (e exitErr) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 func (e exitErr) ExitCode() int { return int(e) }
 
-const wantMarkup = "<b>prezilla</b> 1.2.3\nPresentation mode switcher\n\nLicense: Apache-2.0\n" +
+const wantMarkup = "<b>Prezilla</b> 1.2.3\nPresentation mode switcher\n\nLicense: Apache-2.0\n" +
 	`<a href="https://github.com/dol/prezilla">github.com/dol/prezilla</a>`
 
 func zenityKey(iconFlag, markup string) string {
-	return strings.Join([]string{"zenity", "--info", "--title=About prezilla", "--width=380",
+	return strings.Join([]string{"zenity", "--info", "--title=About Prezilla", "--width=380",
 		"--ok-label=Close", "--modal", iconFlag, "--text=" + markup}, " ")
 }
 
@@ -146,7 +146,7 @@ func TestAboutMarkupEscapesEveryValue(t *testing.T) {
 
 func TestAboutMarkupVersionEscaped(t *testing.T) {
 	got := aboutMarkup(about.New(`"1<2&3"`))
-	if !strings.HasPrefix(got, "<b>prezilla</b> &quot;1&lt;2&amp;3&quot;\n") {
+	if !strings.HasPrefix(got, "<b>Prezilla</b> &quot;1&lt;2&amp;3&quot;\n") {
 		t.Errorf("markup %q", got)
 	}
 }
@@ -193,7 +193,7 @@ func TestEscapeMarkup(t *testing.T) {
 
 func TestAboutMarkupHostileBackslashVersion(t *testing.T) {
 	got := aboutMarkup(about.New("1<b>x</b>&\"'\\074i\\076"))
-	want := "<b>prezilla</b> 1&lt;b&gt;x&lt;/b&gt;&amp;&quot;&apos;\\\\074i\\\\076\n"
+	want := "<b>Prezilla</b> 1&lt;b&gt;x&lt;/b&gt;&amp;&quot;&apos;\\\\074i\\\\076\n"
 	if !strings.HasPrefix(got, want) {
 		t.Errorf("markup %q, want prefix %q", got, want)
 	}

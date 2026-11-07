@@ -12,8 +12,17 @@ func TestNewDefaultsVersionToDev(t *testing.T) {
 }
 
 func TestTextExactLines(t *testing.T) {
-	want := "prezilla 1.2.3\nPresentation mode switcher\nLicense: Apache-2.0\nWebsite: https://github.com/dol/prezilla\n"
+	want := "Prezilla 1.2.3\nPresentation mode switcher\nLicense: Apache-2.0\nWebsite: https://github.com/dol/prezilla\n"
 	if got := New("1.2.3").Text(); got != want {
 		t.Fatalf("Text() = %q, want %q", got, want)
+	}
+}
+
+func TestDisplayNameIsPrezilla(t *testing.T) {
+	if Name != "Prezilla" {
+		t.Fatalf("Name = %q, want Prezilla", Name)
+	}
+	if IconName != "prezilla" {
+		t.Fatalf("IconName = %q, want lowercase identifier prezilla", IconName)
 	}
 }

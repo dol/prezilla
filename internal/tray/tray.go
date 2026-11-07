@@ -30,9 +30,9 @@ var errNoHost = errors.New(`no system tray (StatusNotifier host) found; use "pre
 // Labels returns the tooltip's first words for the given state.
 func Labels(active bool) string {
 	if active {
-		return "prezilla: presentation mode on"
+		return "Prezilla: presentation mode on"
 	}
-	return "prezilla: presentation mode off"
+	return "Prezilla: presentation mode off"
 }
 
 // Icon returns the embedded PNG for the given state.
@@ -256,7 +256,7 @@ type Config struct {
 	Spawn    func() error
 	About    about.Info
 	Notifier system.Notifier
-	// AboutWindow shows About prezilla (with the clickable project link);
+	// AboutWindow shows About Prezilla (with the clickable project link);
 	// nil or a failure falls back to the About notification.
 	AboutWindow system.AboutWindow
 	// ScreenSaver reports screensaver activation; nil disables the
@@ -269,7 +269,7 @@ type Config struct {
 
 // aboutMessage composes the About notification.
 func aboutMessage(info about.Info) (summary, body string) {
-	return "prezilla " + info.Version, info.Comments + "\nLicense: " + info.License + "\n" + info.Website
+	return "Prezilla " + info.Version, info.Comments + "\nLicense: " + info.License + "\n" + info.Website
 }
 
 func aboutAction(n system.Notifier, info about.Info) func(context.Context) error {
@@ -282,7 +282,7 @@ func aboutAction(n system.Notifier, info about.Info) func(context.Context) error
 	}
 }
 
-// aboutShower runs About prezilla: the window when there is one, otherwise
+// aboutShower runs About Prezilla: the window when there is one, otherwise
 // (or when it fails) the notification. At most one runs at a time.
 type aboutShower struct {
 	window   system.AboutWindow
@@ -456,7 +456,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	e, timeout, spawn := cfg.Engine, cfg.Timeout, cfg.Spawn
 	step := continueStep(timeout)
 	systray.SetIcon(Icon(false))
-	systray.SetTitle("prezilla")
+	systray.SetTitle("Prezilla")
 
 	// Items cannot be reordered after creation: create them in menu order,
 	// hide the conditional ones, and let refresh show them.
@@ -472,7 +472,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	resetItem := systray.AddMenuItem(m.Reset.Title, m.Reset.Tooltip)
 	resetItem.Hide()
 	systray.AddSeparator()
-	aboutItem := systray.AddMenuItem("About prezilla", "Shows the version, license and website.")
+	aboutItem := systray.AddMenuItem("About Prezilla", "Shows the version, license and website.")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit", "Closes the tray icon; presentation mode stays as it is.")
 
@@ -501,7 +501,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			systray.SetTooltip("prezilla: " + err.Error())
+			systray.SetTooltip("Prezilla: " + err.Error())
 			return
 		}
 		now := time.Now()

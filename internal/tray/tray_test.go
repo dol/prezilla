@@ -18,10 +18,10 @@ import (
 )
 
 func TestLabelsActiveAndInactive(t *testing.T) {
-	if tip := Labels(true); tip != "prezilla: presentation mode on" {
+	if tip := Labels(true); tip != "Prezilla: presentation mode on" {
 		t.Errorf("active: %q", tip)
 	}
-	if tip := Labels(false); tip != "prezilla: presentation mode off" {
+	if tip := Labels(false); tip != "Prezilla: presentation mode off" {
 		t.Errorf("inactive: %q", tip)
 	}
 }
@@ -68,15 +68,15 @@ func TestTooltip(t *testing.T) {
 		prompting bool
 		want      string
 	}{
-		{false, "", "", "", false, "prezilla: presentation mode off"},
-		{true, "", "", "", false, "prezilla: presentation mode on"},
-		{true, "3 min left", "", "", false, "prezilla: presentation mode on, 3 min left"},
-		{false, "", "boom", "", false, "prezilla: presentation mode off (error: boom)"},
-		{true, "1 min left", "boom", "", false, "prezilla: presentation mode on, 1 min left (error: boom)"},
-		{true, "", "", "expired", false, "prezilla: presentation mode on (error: expired)"},
-		{true, "", "boom", "expired", false, "prezilla: presentation mode on (error: boom; expired)"},
-		{true, "3 min left", "", "", true, "prezilla: presentation mode on, 3 min left\nScreensaver started. Keep presenting?"},
-		{true, "3 min left", "boom", "", true, "prezilla: presentation mode on, 3 min left (error: boom)\nScreensaver started. Keep presenting?"},
+		{false, "", "", "", false, "Prezilla: presentation mode off"},
+		{true, "", "", "", false, "Prezilla: presentation mode on"},
+		{true, "3 min left", "", "", false, "Prezilla: presentation mode on, 3 min left"},
+		{false, "", "boom", "", false, "Prezilla: presentation mode off (error: boom)"},
+		{true, "1 min left", "boom", "", false, "Prezilla: presentation mode on, 1 min left (error: boom)"},
+		{true, "", "", "expired", false, "Prezilla: presentation mode on (error: expired)"},
+		{true, "", "boom", "expired", false, "Prezilla: presentation mode on (error: boom; expired)"},
+		{true, "3 min left", "", "", true, "Prezilla: presentation mode on, 3 min left\nScreensaver started. Keep presenting?"},
+		{true, "3 min left", "boom", "", true, "Prezilla: presentation mode on, 3 min left (error: boom)\nScreensaver started. Keep presenting?"},
 	}
 	for _, c := range cases {
 		if got := tooltip(c.active, c.remaining, c.toggleErr, c.expiryErr, c.prompting); got != c.want {
@@ -157,7 +157,7 @@ func TestSpawnIfDeadline(t *testing.T) {
 func TestAboutMessage(t *testing.T) {
 	info := about.New("1.2.3")
 	s, b := aboutMessage(info)
-	if s != "prezilla 1.2.3" {
+	if s != "Prezilla 1.2.3" {
 		t.Errorf("summary %q", s)
 	}
 	want := "Presentation mode switcher\nLicense: Apache-2.0\nhttps://github.com/dol/prezilla"
@@ -173,7 +173,7 @@ func TestAboutAction(t *testing.T) {
 	refreshed := 0
 	done := func() { refreshed++ }
 	a.run(context.Background(), aboutAction(n, info), done)
-	if len(n.Calls) != 1 || n.Calls[0].Summary != "prezilla 1.2.3" || n.Calls[0].Icon != "prezilla" {
+	if len(n.Calls) != 1 || n.Calls[0].Summary != "Prezilla 1.2.3" || n.Calls[0].Icon != "prezilla" {
 		t.Errorf("notify calls %v", n.Calls)
 	}
 	if a.text() != "" || refreshed != 1 {
@@ -185,7 +185,7 @@ func TestAboutAction(t *testing.T) {
 	if a.text() != "no bus" {
 		t.Errorf("text %q", a.text())
 	}
-	if tip := tooltip(false, "", a.text(), "", false); tip != "prezilla: presentation mode off (error: no bus)" {
+	if tip := tooltip(false, "", a.text(), "", false); tip != "Prezilla: presentation mode off (error: no bus)" {
 		t.Errorf("tooltip %q", tip)
 	}
 	n.Err = nil
@@ -601,7 +601,7 @@ func TestAboutShowerNoZenityFallsBackAndWarnsOnce(t *testing.T) {
 		if err := s.show(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if len(n.Calls) != i || n.Calls[i-1].Summary != "prezilla 1.2.3" ||
+		if len(n.Calls) != i || n.Calls[i-1].Summary != "Prezilla 1.2.3" ||
 			!strings.Contains(n.Calls[i-1].Body, about.Website) {
 			t.Fatalf("click %d: notify %v", i, n.Calls)
 		}
@@ -692,5 +692,12 @@ func TestAboutShowerQuitClosesOpenWindow(t *testing.T) {
 	s.wait() // returns only because the cancelled ctx closed the window
 	if a.text() != "" {
 		t.Errorf("text %q", a.text())
+	}
+}
+
+func TestNoHostErrorKeepsLowercaseCommand(t *testing.T) {
+	want := `use "prezilla toggle" from the command line`
+	if !strings.Contains(errNoHost.Error(), want) {
+		t.Fatalf("errNoHost = %q, want it to contain %q", errNoHost, want)
 	}
 }

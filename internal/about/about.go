@@ -4,7 +4,7 @@ package about
 
 // Identity constants. Website is an assumed URL for the project repository.
 const (
-	Name         = "prezilla"
+	Name         = "Prezilla"
 	Comments     = "Presentation mode switcher"
 	License      = "Apache-2.0"
 	Website      = "https://github.com/dol/prezilla"

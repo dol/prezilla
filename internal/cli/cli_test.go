@@ -446,8 +446,21 @@ func TestRunAboutPrintsTextAndExitsZero(t *testing.T) {
 	if c := Run(context.Background(), []string{"about", "extra"}, &out, &errOut, d); c != 0 {
 		t.Fatalf("exit %d, stderr %q", c, errOut.String())
 	}
-	want := "prezilla 1.2.3\nPresentation mode switcher\nLicense: Apache-2.0\nWebsite: https://github.com/dol/prezilla\n"
+	want := "Prezilla 1.2.3\nPresentation mode switcher\nLicense: Apache-2.0\nWebsite: https://github.com/dol/prezilla\n"
 	if out.String() != want || errOut.Len() != 0 {
 		t.Fatalf("out %q err %q", out.String(), errOut.String())
+	}
+}
+
+func TestUsageKeepsLowercaseCommandName(t *testing.T) {
+	if !strings.HasPrefix(usage, "usage: prezilla <on ") {
+		t.Fatalf("usage = %q", usage)
+	}
+	h := newHarness(t)
+	if c := h.run("bogus"); c != 2 {
+		t.Fatalf("code %d", c)
+	}
+	if !strings.Contains(h.errOut.String(), "usage: prezilla <") {
+		t.Errorf("stderr %q", h.errOut.String())
 	}
 }

@@ -167,6 +167,9 @@ func TestLockTimeoutErrorNamesLockPath(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), p+".lock") {
 		t.Fatalf("err = %v", err)
 	}
+	if !strings.Contains(err.Error(), "waiting for another Prezilla process") {
+		t.Fatalf("err = %v, want the display name Prezilla", err)
+	}
 	if a.enabled != 0 {
 		t.Fatal("switch called without the lock")
 	}
