@@ -576,7 +576,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	}
 	refresh()
 
-	// toggle is the one handler for the checkbox and the icon's left click.
+	// toggle is the one handler for the checkbox and a click on the icon.
 	// A click while a toggle runs is dropped.
 	toggle := func() {
 		tg.start(ctx, func(tctx context.Context) {
