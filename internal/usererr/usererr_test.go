@@ -197,3 +197,20 @@ func TestSplit(t *testing.T) {
 		t.Errorf("unmapped: %q, %q", s, d)
 	}
 }
+
+func TestJoinSentences(t *testing.T) {
+	for _, c := range []struct {
+		parts []string
+		want  string
+	}{
+		{nil, ""},
+		{[]string{"", "a", ""}, "a"},
+		{[]string{"a", "b"}, "a; b"},
+		{[]string{"x.", "y"}, "x. y"},
+		{[]string{"x!", "", "y?", "z"}, "x! y? z"},
+	} {
+		if got := JoinSentences(c.parts...); got != c.want {
+			t.Errorf("%q: got %q want %q", c.parts, got, c.want)
+		}
+	}
+}

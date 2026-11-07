@@ -64,14 +64,8 @@ func tooltip(active bool, remaining, toggleErr, expiryErr string, prompting bool
 	if remaining != "" {
 		tip += ", " + remaining
 	}
-	var errs []string
-	for _, e := range []string{toggleErr, expiryErr} {
-		if e != "" {
-			errs = append(errs, e)
-		}
-	}
-	if len(errs) > 0 {
-		tip += " (error: " + strings.Join(errs, "; ") + ")"
+	if joined := usererr.JoinSentences(toggleErr, expiryErr); joined != "" {
+		tip += " (error: " + joined + ")"
 	}
 	if prompting {
 		tip += "\n" + promptLine
@@ -385,16 +379,8 @@ func statusTooltip(sentence string) string {
 	return "Prezilla: " + sentence
 }
 
-// joinErrText joins two non-empty error texts with "; ".
-func joinErrText(a, b string) string {
-	switch {
-	case a == "":
-		return b
-	case b == "":
-		return a
-	}
-	return a + "; " + b
-}
+// joinErrText joins two error texts (see usererr.JoinSentences).
+func joinErrText(a, b string) string { return usererr.JoinSentences(a, b) }
 
 // actionState holds the last About error for the tooltip.
 type actionState struct {

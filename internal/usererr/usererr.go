@@ -219,25 +219,30 @@ func Explain(err error) string {
 	return strings.Join(lines, "\n")
 }
 
-// joinSentences joins parts with a space after sentence-ending punctuation
-// and with "; " otherwise.
-func joinSentences(parts []string) string {
+// JoinSentences joins non-empty parts with a single space after
+// sentence-ending punctuation (. ! ?) and with "; " otherwise.
+func JoinSentences(parts ...string) string {
 	var b strings.Builder
-	for i, p := range parts {
-		if i > 0 {
-			if strings.HasSuffix(parts[i-1], ".") || strings.HasSuffix(parts[i-1], "!") || strings.HasSuffix(parts[i-1], "?") {
+	last := ""
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if last != "" {
+			if strings.HasSuffix(last, ".") || strings.HasSuffix(last, "!") || strings.HasSuffix(last, "?") {
 				b.WriteString(" ")
 			} else {
 				b.WriteString("; ")
 			}
 		}
 		b.WriteString(p)
+		last = p
 	}
 	return b.String()
 }
 
 // Short is the sentence only, for tooltips: no details, several joined
-// (see joinSentences). An error without a rule keeps its original text. nil
+// (see JoinSentences). An error without a rule keeps its original text. nil
 // gives "".
 func Short(err error) string {
 	sentence, _ := Split(err)
@@ -260,5 +265,5 @@ func Split(err error) (sentence, details string) {
 			parts = append(parts, e.Error())
 		}
 	}
-	return joinSentences(parts), strings.Join(techs, "; ")
+	return JoinSentences(parts...), strings.Join(techs, "; ")
 }

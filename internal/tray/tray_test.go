@@ -813,3 +813,14 @@ func TestSessionEnded(t *testing.T) {
 		}
 	}
 }
+
+func TestErrorTextsJoinWithoutDoubledPunctuation(t *testing.T) {
+	toggle := usererr.Short(fmt.Errorf("mute: %w", fmt.Errorf("read sink mute: %w", errors.New("pulse: connect: refused"))))
+	got := joinErrText(toggle, "about: no notifier configured")
+	if strings.Contains(got, ".;") || !strings.HasSuffix(got, `in config.json. about: no notifier configured`) {
+		t.Errorf("got %q", got)
+	}
+	if tip := tooltip(true, "", got, "", false); strings.Contains(tip, ".;") {
+		t.Errorf("tooltip %q", tip)
+	}
+}
