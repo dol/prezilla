@@ -422,6 +422,14 @@ func sessionEnded(wasActive, wasDeadline, active, deadline bool) bool {
 	return wasActive && !active || wasDeadline && !deadline
 }
 
+// clearActionErrors forgets the error texts of the About, Reset and prompt
+// actions once their session is over.
+func clearActionErrors(actions, extend *actionState, coord *promptCoordinator) {
+	actions.clear()
+	extend.clear()
+	coord.clearErr()
+}
+
 func (a *actionState) text() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -572,8 +580,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 		now := time.Now()
 		hasDeadline := st.Active && !st.ExpiresAt.IsZero()
 		if sessionEnded(wasActive, wasDeadline, st.Active, hasDeadline) {
-			actions.clear()
-			extendErr.clear()
+			clearActionErrors(&actions, &extendErr, coord)
 		}
 		wasActive, wasDeadline = st.Active, hasDeadline
 		coord.check(st, now)

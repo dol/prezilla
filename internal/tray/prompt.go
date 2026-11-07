@@ -305,6 +305,13 @@ func (c *promptCoordinator) pending() bool {
 	return c.waiting
 }
 
+// clearErr forgets the last error text (the session it belonged to is over).
+func (c *promptCoordinator) clearErr() {
+	c.mu.Lock()
+	c.err = ""
+	c.mu.Unlock()
+}
+
 func (c *promptCoordinator) errText() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

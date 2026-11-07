@@ -610,3 +610,21 @@ func TestCoordinatorErrorClearsWhenQuestionResolves(t *testing.T) {
 		t.Errorf("stale error %q", got)
 	}
 }
+
+// A failed "Stop presenting" leaves its error in the coordinator after the
+// question is gone; it must vanish once the session has ended.
+func TestSessionEndClearsActionErrorsIncludingCoordinator(t *testing.T) {
+	p := blockingPrompter()
+	f := newFixture(t, p)
+	f.eng.opErr = errors.New("mute: boom")
+	f.ss.Emit(true)
+	eventually(t, "prompt", f.c.pending)
+	p.Answer <- "end"
+	eventually(t, "error", func() bool { return f.c.errText() != "" })
+	var actions, extend actionState
+	actions.err, extend.err = "a", "b"
+	clearActionErrors(&actions, &extend, f.c)
+	if f.c.errText() != "" || actions.text() != "" || extend.text() != "" {
+		t.Errorf("not cleared: %q %q %q", f.c.errText(), actions.text(), extend.text())
+	}
+}
