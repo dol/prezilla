@@ -357,101 +357,32 @@ func TestMenuStateTitlesFromStep(t *testing.T) {
 	}
 }
 
-// fakeClock is a settable clock for the toggle cooldown tests.
-type fakeClock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *fakeClock) now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *fakeClock) add(d time.Duration) {
-	c.mu.Lock()
-	c.t = c.t.Add(d)
-	c.mu.Unlock()
-}
-
-func TestToggleCooldownDropsFastSecondClick(t *testing.T) {
-	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
-	g := &clickGate{now: clk.now}
-	var tg toggler
-	runs := 0
-	var mu sync.Mutex
-	fn := func(context.Context) { mu.Lock(); runs++; mu.Unlock() }
-	if !tryToggle(context.Background(), g, &tg, fn) {
-		t.Fatal("first click refused")
-	}
-	tg.wait()
-	clk.add(100 * time.Millisecond)
-	if tryToggle(context.Background(), g, &tg, fn) {
-		t.Error("click at +100ms accepted")
-	}
-	req := make(chan struct{}, 1)
-	if requestToggle(g, req) || len(req) != 0 {
-		t.Error("click during cooldown was queued or reported accepted")
-	}
-	clk.add(500 * time.Millisecond) // +600ms
-	if !requestToggle(g, req) || len(req) != 1 {
-		t.Error("click after cooldown not queued")
-	}
-	if !requestToggle(g, req) {
-		t.Error("a click merged into a queued one counts as accepted")
-	}
-	if !tryToggle(context.Background(), g, &tg, fn) {
-		t.Error("click at +600ms refused")
-	}
-	tg.wait()
-	mu.Lock()
-	defer mu.Unlock()
-	if runs != 2 {
-		t.Errorf("toggle ran %d times, want 2", runs)
-	}
-	if toggleCooldown != 500*time.Millisecond {
-		t.Errorf("cooldown %v", toggleCooldown)
-	}
-}
-
-func TestToggleCooldownStartsEvenWhenToggleFails(t *testing.T) {
-	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
-	g := &clickGate{now: clk.now}
-	var tg toggler
-	var a actionState
-	failing := func(ctx context.Context) {
-		a.run(ctx, func(context.Context) error { return errors.New("mute: boom") }, func() {})
-	}
-	if !tryToggle(context.Background(), g, &tg, failing) {
-		t.Fatal("first click refused")
-	}
-	tg.wait()
-	if a.text() != "mute: boom" {
-		t.Fatalf("toggle did not run: %q", a.text())
-	}
-	clk.add(100 * time.Millisecond)
-	if tryToggle(context.Background(), g, &tg, failing) {
-		t.Error("click after a failed toggle accepted within the cooldown")
-	}
-}
-
-func TestToggleWhileRunningDroppedAndDoesNotRestartCooldown(t *testing.T) {
-	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
-	g := &clickGate{now: clk.now}
+func TestToggleWhileRunningIsDropped(t *testing.T) {
 	var tg toggler
 	release := make(chan struct{})
-	if !tryToggle(context.Background(), g, &tg, func(context.Context) { <-release }) {
+	if !tg.start(context.Background(), func(context.Context) { <-release }) {
 		t.Fatal("first click refused")
 	}
-	clk.add(600 * time.Millisecond) // cooldown over, toggle still running
-	if tryToggle(context.Background(), g, &tg, func(context.Context) { t.Error("overlapping toggle ran") }) {
+	if tg.start(context.Background(), func(context.Context) { t.Error("overlapping toggle ran") }) {
 		t.Error("click while running accepted")
 	}
 	close(release)
 	tg.wait()
-	clk.add(10 * time.Millisecond)
 	ran := make(chan struct{})
-	if !tryToggle(context.Background(), g, &tg, func(context.Context) { close(ran) }) {
-		t.Error("dropped click restarted the cooldown")
+	if !tg.start(context.Background(), func(context.Context) { close(ran) }) {
+		t.Error("click right after the toggle ended refused")
 	}
 	<-ran
 	tg.wait()
+}
+
+func TestRequestToggleMergesQueuedRequests(t *testing.T) {
+	req := make(chan struct{}, 1)
+	requestToggle(req)
+	requestToggle(req)
+	if len(req) != 1 {
+		t.Errorf("queued %d requests, want 1", len(req))
+	}
 }
 
 func TestStepMinutes(t *testing.T) {
@@ -839,38 +770,5 @@ func TestErrorTextsJoinWithoutDoubledPunctuation(t *testing.T) {
 	}
 	if tip := tooltip(true, "", got, "", false); strings.Contains(tip, ".;") {
 		t.Errorf("tooltip %q", tip)
-	}
-}
-
-// Only a click dropped by the cooldown needs an immediate refresh; a click
-// refused because a toggle is still running is covered by that toggle's own
-// final refresh (and refresh would block on the engine lock).
-func TestTryToggleOutcomeSaysWhyItWasRefused(t *testing.T) {
-	clk := &fakeClock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
-	g := &clickGate{now: clk.now}
-	var tg toggler
-	release := make(chan struct{})
-	started := make(chan struct{})
-	fn := func(context.Context) { close(started); <-release }
-	if got := tryToggleOutcome(context.Background(), g, &tg, fn); got != outcomeStarted {
-		t.Fatalf("first: %v", got)
-	}
-	<-started
-	clk.add(100 * time.Millisecond)
-	if got := tryToggleOutcome(context.Background(), g, &tg, fn); got != outcomeCooling {
-		t.Errorf("within cooldown: %v", got)
-	}
-	clk.add(time.Second)
-	if got := tryToggleOutcome(context.Background(), g, &tg, fn); got != outcomeBusy {
-		t.Errorf("after cooldown while running: %v", got)
-	}
-	close(release)
-	tg.wait()
-	if got := tryToggleOutcome(context.Background(), g, &tg, func(context.Context) {}); got != outcomeStarted {
-		t.Errorf("idle after cooldown: %v", got)
-	}
-	tg.wait()
-	if outcomeCooling.needsRefresh() != true || outcomeBusy.needsRefresh() || outcomeStarted.needsRefresh() {
-		t.Error("only a cooldown drop needs a refresh")
 	}
 }

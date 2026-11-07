@@ -149,63 +149,6 @@ func quitTitle(active bool) string {
 	return "Quit"
 }
 
-// toggleCooldown is how long after an accepted toggle further toggle clicks
-// (icon or checkbox) are ignored, so a double click cannot flip the mode
-// on and straight back off.
-const toggleCooldown = 500 * time.Millisecond
-
-// clickGate drops toggle clicks within toggleCooldown of the last accepted
-// toggle.
-type clickGate struct {
-	now func() time.Time
-
-	mu   sync.Mutex
-	last time.Time // start of the last accepted toggle; zero before the first
-}
-
-// open reports whether the cooldown has passed.
-func (g *clickGate) open() bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.last.IsZero() || g.now().Sub(g.last) >= toggleCooldown
-}
-
-// toggleOutcome says what tryToggleOutcome did with a click.
-type toggleOutcome int
-
-const (
-	outcomeStarted toggleOutcome = iota // fn was started
-	outcomeCooling                      // dropped by the cooldown
-	outcomeBusy                         // a toggle is still running
-)
-
-// needsRefresh reports whether a refused click must re-send the state at
-// once. A busy click does not: the running toggle refreshes when it ends, and
-// a refresh now would block the menu loop on the engine lock.
-func (o toggleOutcome) needsRefresh() bool { return o == outcomeCooling }
-
-// tryToggle starts fn on tg unless the cooldown is running or a toggle is
-// already running; an accepted toggle starts the cooldown whatever its
-// result. It reports whether fn was started.
-func tryToggle(ctx context.Context, g *clickGate, tg *toggler, fn func(context.Context)) bool {
-	return tryToggleOutcome(ctx, g, tg, fn) == outcomeStarted
-}
-
-// tryToggleOutcome is tryToggle with the reason for a refusal.
-func tryToggleOutcome(ctx context.Context, g *clickGate, tg *toggler, fn func(context.Context)) toggleOutcome {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	now := g.now()
-	if !g.last.IsZero() && now.Sub(g.last) < toggleCooldown {
-		return outcomeCooling
-	}
-	if !tg.start(ctx, fn) {
-		return outcomeBusy
-	}
-	g.last = now
-	return outcomeStarted
-}
-
 // startExtend runs one Engine.Extend call for the Reset timer item on xt, detached from ctx's cancellation
 // and bounded by core.OperationTimeout, unless one is already running. A
 // (false, nil) result (the session ended meanwhile) changes nothing; an
@@ -464,7 +407,6 @@ func Run(ctx context.Context, cfg Config) error {
 
 	var tg, xt toggler // toggle and Reset timer: at most one of each at a time
 	shower := &aboutShower{window: cfg.AboutWindow, notifier: cfg.Notifier, info: cfg.About}
-	gate := &clickGate{now: time.Now}
 	// redraw asks the menu loop to refresh; coalesced, never blocks.
 	redraw := make(chan struct{}, 1)
 	// toggleReq carries left clicks on the icon and checkbox clicks to the
@@ -497,8 +439,8 @@ func Run(ctx context.Context, cfg Config) error {
 	// Set before systray.Run: the library reads it when it exports the item
 	// (ItemIsMenu), and the host then sends left clicks as Activate. A host
 	// that never calls Activate still opens the menu.
-	systray.SetOnTapped(func() { requestToggle(gate, toggleReq) })
-	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, gate, shower, coord, redraw, toggleReq) }, cancel)
+	systray.SetOnTapped(func() { requestToggle(toggleReq) })
+	systray.Run(func() { onReady(ctx, cancel, cfg, &tg, &xt, shower, coord, redraw, toggleReq) }, cancel)
 	cancel()
 	<-watchDone
 	shower.wait()
@@ -508,23 +450,18 @@ func Run(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-// requestToggle queues one toggle request without blocking. A click during
-// the cooldown is dropped, not queued; a request that arrives while one is
-// queued is merged into it. It reports whether the click was accepted
-// (queued or merged); a dropped checkbox click needs a refresh, because the
-// host may already have changed the checkmark.
-func requestToggle(g *clickGate, req chan<- struct{}) bool {
-	if !g.open() {
-		return false
-	}
+// requestToggle queues one toggle request without blocking; a request that
+// arrives while one is queued is merged into it. A request that arrives while
+// a toggle is running is dropped by toggler.start, and that toggle's final
+// refresh puts the real state back.
+func requestToggle(req chan<- struct{}) {
 	select {
 	case req <- struct{}{}:
 	default:
 	}
-	return true
 }
 
-func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt *toggler, gate *clickGate,
+func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt *toggler,
 	shower *aboutShower, coord *promptCoordinator, redraw <-chan struct{}, toggleReq chan struct{}) {
 	e, timeout, spawn := cfg.Engine, cfg.Timeout, cfg.Spawn
 	step := continueStep(timeout)
@@ -640,10 +577,9 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 	refresh()
 
 	// toggle is the one handler for the checkbox and the icon's left click.
-	// The cooldown applies here and in requestToggle, never to Reset timer
-	// or the question items.
+	// A click while a toggle runs is dropped.
 	toggle := func() {
-		if out := tryToggleOutcome(ctx, gate, tg, func(tctx context.Context) {
+		tg.start(ctx, func(tctx context.Context) {
 			_, err := e.Toggle(tctx, timeout)
 			if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
 				err = errors.Join(err, serr)
@@ -655,9 +591,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 				fmt.Fprintln(os.Stderr, usererr.Explain(err))
 			}
 			refresh()
-		}); out.needsRefresh() {
-			refresh() // dropped by the cooldown (lock free): re-send the real state
-		}
+		})
 	}
 
 	go func() {
@@ -677,9 +611,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt 
 			case <-stopItem.ClickedCh:
 				coord.menuAnswer(ctx, keyEnd)
 			case <-modeItem.ClickedCh:
-				if !requestToggle(gate, toggleReq) {
-					refresh() // dropped click: put the real checkmark back now
-				}
+				requestToggle(toggleReq)
 			case <-toggleReq:
 				toggle()
 			case <-resetItem.ClickedCh:
