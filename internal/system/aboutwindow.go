@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 
 	"prezilla/internal/about"
 )
@@ -36,6 +37,9 @@ func zenityStartFailure(err error) bool {
 	return strings.Contains(text, "cannot open display") ||
 		strings.Contains(text, "Failed to open display")
 }
+
+// errZenityStart marks zenity failing to show its window.
+var errZenityStart = errors.New("zenity could not start its window")
 
 // zenity --info exit codes besides 0 that mean "closed, nothing to do": 1
 // (Esc or the title-bar X on zenity 4.2.1 under Xvfb; Enter exits 0), 5
@@ -69,7 +73,7 @@ func (z ZenityAbout) Show(ctx context.Context, info about.Info) error {
 			return ctx.Err()
 		case errors.As(err, &ec) && zenityClosed[ec.ExitCode()]:
 			if ec.ExitCode() == 1 && zenityStartFailure(err) {
-				return fmt.Errorf("about: zenity could not start its window: %w", err)
+				return fmt.Errorf("about: %w: %w", errZenityStart, err)
 			}
 			return nil
 		case errors.Is(err, context.DeadlineExceeded):
@@ -79,6 +83,38 @@ func (z ZenityAbout) Show(ctx context.Context, info about.Info) error {
 		return fmt.Errorf("about: %w", err)
 	}
 	return nil
+}
+
+// FallbackAbout shows Primary and, when that cannot show a window (zenity
+// missing or unable to start), Secondary. Anything else Primary returns,
+// including a user closing the window and ctx errors, is final. If Secondary
+// fails too its error is returned, so the caller can fall back to a
+// notification.
+type FallbackAbout struct {
+	Primary, Secondary AboutWindow
+	// Note, when set, is called once (not per click) with Primary's error
+	// the first time Secondary is used.
+	Note func(primary error)
+
+	once sync.Once
+}
+
+// noWindow reports whether err means the window never appeared: zenity is
+// missing, or it could not start (see zenityStartFailure).
+func noWindow(err error) bool {
+	return errors.Is(err, ErrNoZenity) || errors.Is(err, errZenityStart)
+}
+
+// Show implements AboutWindow.
+func (f *FallbackAbout) Show(ctx context.Context, info about.Info) error {
+	err := f.Primary.Show(ctx, info)
+	if err == nil || ctx.Err() != nil || !noWindow(err) {
+		return err
+	}
+	if f.Note != nil {
+		f.once.Do(func() { f.Note(err) })
+	}
+	return f.Secondary.Show(ctx, info)
 }
 
 // zenityMajor parses the major version from `zenity --version` output such
