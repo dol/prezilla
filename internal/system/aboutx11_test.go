@@ -264,3 +264,25 @@ func TestFallbackAboutWithRealZenity(t *testing.T) {
 		t.Errorf("no runner: err %v secondary calls %d", err, s.calls)
 	}
 }
+
+func TestFallbackAboutShouldFallbackOverridesTheDefaultRule(t *testing.T) {
+	boom := errors.New("x11: unsupported visual")
+	for name, c := range map[string]struct {
+		err    error
+		should func(error) bool
+		second bool
+	}{
+		"custom rule says yes":             {boom, func(error) bool { return true }, true},
+		"custom rule says no":              {boom, func(error) bool { return false }, false},
+		"dead display is not retried":      {ErrNoDisplay, func(err error) bool { return !errors.Is(err, ErrNoDisplay) }, false},
+		"default rule keeps zenity logic":  {ErrNoZenity, nil, true},
+		"default rule ignores other error": {boom, nil, false},
+	} {
+		p, s := &fakeAbout{err: c.err}, &fakeAbout{}
+		f := &FallbackAbout{Primary: p, Secondary: s, ShouldFallback: c.should}
+		_ = f.Show(context.Background(), about.New("1"))
+		if (s.calls > 0) != c.second {
+			t.Errorf("%s: secondary called %d times, want called=%v", name, s.calls, c.second)
+		}
+	}
+}

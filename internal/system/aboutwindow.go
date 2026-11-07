@@ -102,6 +102,10 @@ type FallbackAbout struct {
 	// Note, when set, is called once (not per click) with Primary's error
 	// the first time Secondary is used.
 	Note func(primary error)
+	// ShouldFallback decides whether Primary's error means Secondary should
+	// be tried. Nil means noWindow: Primary is zenity and it never showed a
+	// window.
+	ShouldFallback func(err error) bool
 
 	once sync.Once
 }
@@ -115,7 +119,11 @@ func noWindow(err error) bool {
 // Show implements AboutWindow.
 func (f *FallbackAbout) Show(ctx context.Context, info about.Info) error {
 	err := f.Primary.Show(ctx, info)
-	if err == nil || ctx.Err() != nil || !noWindow(err) {
+	should := f.ShouldFallback
+	if should == nil {
+		should = noWindow
+	}
+	if err == nil || ctx.Err() != nil || !should(err) {
 		return err
 	}
 	if f.Note != nil {

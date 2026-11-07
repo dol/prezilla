@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,17 +73,21 @@ func run(ctx context.Context) int {
 		// long timeout; Quit still closes it through ctx. zenity 4 reads
 		// --icon=prezilla as a file path first, so run it from "/" where no
 		// such file can shadow the icon name.
-		// Without zenity (or when it cannot start) the built-in X11 window
-		// takes over; the tray falls back to a notification if that fails.
+		// The built-in X11 window comes first (zenity draws the logo too
+		// small); zenity is the fallback and the tray falls back to a
+		// notification if both fail.
 		// The logo is written to the cache directory so zenity gets a file
 		// path: the icon theme has no "prezilla" entry until the application
 		// is installed.
 		zenity := system.ZenityAbout{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}, IconFile: iconFile()}
 		aboutWindow := &system.FallbackAbout{
-			Primary:   zenity,
-			Secondary: system.X11About{Icon: icons.App},
-			Note: func(error) {
-				fmt.Fprintln(os.Stderr, "about: zenity not available; showing the built-in window instead")
+			Primary:   system.X11About{Icon: icons.App},
+			Secondary: zenity,
+			// A dead display fails zenity too; any other failure of the
+			// built-in window (for example an unsupported visual) tries it.
+			ShouldFallback: func(err error) bool { return !errors.Is(err, system.ErrNoDisplay) },
+			Note: func(err error) {
+				fmt.Fprintf(os.Stderr, "about: built-in window failed (%v); trying zenity\n", err)
 			},
 		}
 		return tray.Run(ctx, tray.Config{
