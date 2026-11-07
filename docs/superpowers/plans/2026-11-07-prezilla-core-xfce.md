@@ -464,6 +464,8 @@ Added after the user judged the tray "half-baked" and a `better-interface` revie
 
 ---
 
+> **Revision (user, after Task 18 round 1):** the About window has a single `Close` button (`zenity --info --ok-label=Close`); the project link in the text (`<a href>` limited to http/https) is clickable and opens the website, so the `Open website` button, `system.Opener`/`ExecOpener`/`FakeOpener`, `system.WebsiteError` and the xdg-open/exo-open fallback are removed. Link activation could not be click-tested here and is for the user to confirm.
+
 ### Task 19: Plain-language errors with a next step
 
 **Files:**
