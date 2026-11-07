@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 )
 
 // Engine applies switches in order and restores them in reverse, persisting state.
 // Every read-modify-write holds the Store's cross-process lock.
 type Engine struct {
+	mu        sync.Mutex // guards switches
 	switches  []Switch
 	restorers []Switch
 	store     *Store
@@ -26,6 +28,19 @@ func NewEngine(switches []Switch, store *Store, now func() time.Time) *Engine {
 // config after "on" is still restored.
 func (e *Engine) SetRestorers(all []Switch) { e.restorers = all }
 
+// SetSwitches replaces the configured switches used by later operations.
+func (e *Engine) SetSwitches(sw []Switch) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.switches = sw
+}
+
+func (e *Engine) configured() []Switch {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.switches
+}
+
 // Enable turns presentation mode on. timeout <= 0 means no deadline.
 // If already active it only replaces the deadline.
 func (e *Engine) Enable(ctx context.Context, timeout time.Duration) error {
@@ -38,6 +53,7 @@ func (e *Engine) Enable(ctx context.Context, timeout time.Duration) error {
 }
 
 func (e *Engine) enableLocked(ctx context.Context, timeout time.Duration) error {
+	switches := e.configured()
 	st, err := e.store.Load()
 	if err != nil {
 		return err
@@ -53,7 +69,7 @@ func (e *Engine) enableLocked(ctx context.Context, timeout time.Duration) error 
 		st.Saved = map[string]string{}
 	}
 	var errs []error
-	for _, sw := range e.switches {
+	for _, sw := range switches {
 		saved, err := sw.Enable(ctx)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", sw.ID(), err))
@@ -65,8 +81,8 @@ func (e *Engine) enableLocked(ctx context.Context, timeout time.Duration) error 
 	if err := e.store.Save(st); err != nil {
 		// Originals would be lost: best-effort roll back what was applied.
 		errs = append(errs, fmt.Errorf("save state: %w", err))
-		for i := len(e.switches) - 1; i >= 0; i-- {
-			sw := e.switches[i]
+		for i := len(switches) - 1; i >= 0; i-- {
+			sw := switches[i]
 			saved, ok := st.Saved[sw.ID()]
 			if !ok {
 				continue
@@ -90,6 +106,7 @@ func (e *Engine) Disable(ctx context.Context) error {
 }
 
 func (e *Engine) disableLocked(ctx context.Context) error {
+	switches := e.configured()
 	st, err := e.store.Load()
 	if err != nil {
 		return err
@@ -99,8 +116,8 @@ func (e *Engine) disableLocked(ctx context.Context) error {
 	}
 	var errs []error
 	known := map[string]bool{}
-	for i := len(e.switches) - 1; i >= 0; i-- {
-		sw := e.switches[i]
+	for i := len(switches) - 1; i >= 0; i-- {
+		sw := switches[i]
 		known[sw.ID()] = true
 		saved, ok := st.Saved[sw.ID()]
 		if !ok {
@@ -147,6 +164,85 @@ func (e *Engine) disableLocked(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// EnableOne applies one switch inside an active session and saves its original
+// value; the deadline is untouched. It does nothing and reports false when the
+// mode is off. A switch that is already saved is left alone. A failed switch
+// changes no state; a failed save rolls the switch back best-effort.
+func (e *Engine) EnableOne(ctx context.Context, sw Switch) (bool, error) {
+	unlock, err := e.store.Lock()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	st, err := e.store.Load()
+	if err != nil {
+		return false, err
+	}
+	if !st.Active {
+		return false, nil
+	}
+	if _, ok := st.Saved[sw.ID()]; ok {
+		return true, nil
+	}
+	saved, err := sw.Enable(ctx)
+	if err != nil {
+		return true, fmt.Errorf("%s: %w", sw.ID(), err)
+	}
+	if st.Saved == nil {
+		st.Saved = map[string]string{}
+	}
+	st.Saved[sw.ID()] = saved
+	if err := e.store.Save(st); err != nil {
+		errs := []error{fmt.Errorf("save state: %w", err)}
+		if derr := sw.Disable(ctx, saved); derr != nil {
+			errs = append(errs, fmt.Errorf("rollback %s: %w", sw.ID(), derr))
+		}
+		return true, errors.Join(errs...)
+	}
+	return true, nil
+}
+
+// DisableOne restores one saved switch inside an active session. The mode stays
+// active even when no switch is left, and the deadline is untouched. It does
+// nothing and reports false when the mode is off; an ID that was never saved is
+// a no-op. A failed restore keeps the saved entry.
+func (e *Engine) DisableOne(ctx context.Context, id string) (bool, error) {
+	unlock, err := e.store.Lock()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	st, err := e.store.Load()
+	if err != nil {
+		return false, err
+	}
+	if !st.Active {
+		return false, nil
+	}
+	saved, ok := st.Saved[id]
+	if !ok {
+		return true, nil
+	}
+	var sw Switch
+	for _, c := range append(append([]Switch{}, e.restorers...), e.configured()...) {
+		if c.ID() == id {
+			sw = c
+			break
+		}
+	}
+	if sw == nil {
+		return true, fmt.Errorf("%s: no configured switch to restore", id)
+	}
+	if err := sw.Disable(ctx, saved); err != nil {
+		return true, fmt.Errorf("%s: %w", id, err)
+	}
+	delete(st.Saved, id)
+	if err := e.store.Save(st); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 // Toggle flips the mode and reports whether it is now active.

@@ -369,3 +369,208 @@ func TestRestorerFailureKeepsEntry(t *testing.T) {
 		t.Fatalf("state = %+v", st)
 	}
 }
+
+// activate puts the mode on with the given saved values and deadline.
+func activate(t *testing.T, store *Store, saved map[string]string, exp time.Time) {
+	t.Helper()
+	if err := store.Save(State{Active: true, Saved: saved, ExpiresAt: exp}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnableOneAppliesAndSavesWhenActive(t *testing.T) {
+	a := &fakeSwitch{id: "a", savedVal: "1"}
+	e, store, _ := newTestEngine(t, a)
+	activate(t, store, map[string]string{"x": "0"}, time.Time{})
+	ok, err := e.EnableOne(context.Background(), a)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	st, _ := e.Status()
+	if !st.Active || st.Saved["a"] != "1" || st.Saved["x"] != "0" {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestEnableOneInactiveDoesNothing(t *testing.T) {
+	a := &fakeSwitch{id: "a", savedVal: "1"}
+	e, _, _ := newTestEngine(t, a)
+	ok, err := e.EnableOne(context.Background(), a)
+	if err != nil || ok || a.enabled != 0 {
+		t.Fatalf("ok=%v err=%v enabled=%d", ok, err, a.enabled)
+	}
+	if st, _ := e.Status(); st.Active || len(st.Saved) != 0 {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestEnableOneAlreadySavedIsNoop(t *testing.T) {
+	a := &fakeSwitch{id: "a", savedVal: "new"}
+	e, store, _ := newTestEngine(t, a)
+	activate(t, store, map[string]string{"a": "orig"}, time.Time{})
+	ok, err := e.EnableOne(context.Background(), a)
+	if err != nil || !ok || a.enabled != 0 {
+		t.Fatalf("ok=%v err=%v enabled=%d", ok, err, a.enabled)
+	}
+	if st, _ := e.Status(); st.Saved["a"] != "orig" {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestEnableOneFailureSavesNothing(t *testing.T) {
+	a := &fakeSwitch{id: "a", enableErr: errors.New("boom")}
+	e, store, _ := newTestEngine(t, a)
+	activate(t, store, map[string]string{"x": "0"}, time.Time{})
+	ok, err := e.EnableOne(context.Background(), a)
+	if err == nil || !strings.Contains(err.Error(), "a:") || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	st, _ := e.Status()
+	if _, has := st.Saved["a"]; has || !st.Active || len(st.Saved) != 1 {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestEnableOneSaveFailureRollsBack(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	activate(t, NewStore(path), map[string]string{"x": "0"}, time.Time{})
+	// The lock file must exist beforehand so only Save fails in the read-only dir.
+	if err := os.WriteFile(path+".lock", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	a := &fakeSwitch{id: "a", savedVal: "1"}
+	ok, err := NewEngine([]Switch{a}, NewStore(path), time.Now).EnableOne(context.Background(), a)
+	if err == nil || !strings.Contains(err.Error(), "save state") || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if a.disabled != 1 || a.gotSaved != "1" {
+		t.Fatalf("disabled=%d saved=%q", a.disabled, a.gotSaved)
+	}
+}
+
+func TestEnableOneKeepsDeadline(t *testing.T) {
+	a := &fakeSwitch{id: "a", savedVal: "1"}
+	e, store, c := newTestEngine(t, a)
+	exp := c.t.Add(time.Hour)
+	activate(t, store, map[string]string{"x": "0"}, exp)
+	if _, err := e.EnableOne(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := e.Status(); !st.ExpiresAt.Equal(exp) {
+		t.Fatalf("ExpiresAt = %v, want %v", st.ExpiresAt, exp)
+	}
+}
+
+func TestDisableOneRestoresAndRemovesSaved(t *testing.T) {
+	a := &fakeSwitch{id: "a"}
+	b := &fakeSwitch{id: "b"}
+	e, store, _ := newTestEngine(t, a, b)
+	activate(t, store, map[string]string{"a": "1", "b": "2"}, time.Time{})
+	ok, err := e.DisableOne(context.Background(), "a")
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	st, _ := e.Status()
+	if a.disabled != 1 || a.gotSaved != "1" || b.disabled != 0 || !st.Active || st.Saved["b"] != "2" {
+		t.Fatalf("a=%d/%q b=%d state=%+v", a.disabled, a.gotSaved, b.disabled, st)
+	}
+	if _, has := st.Saved["a"]; has {
+		t.Fatalf("a still saved: %+v", st)
+	}
+}
+
+func TestDisableOneFallsBackToRestorers(t *testing.T) {
+	r := &fakeSwitch{id: "r"}
+	e, store, _ := newTestEngine(t)
+	e.SetRestorers([]Switch{r})
+	activate(t, store, map[string]string{"r": "9"}, time.Time{})
+	ok, err := e.DisableOne(context.Background(), "r")
+	if err != nil || !ok || r.gotSaved != "9" {
+		t.Fatalf("ok=%v err=%v saved=%q", ok, err, r.gotSaved)
+	}
+}
+
+func TestDisableOneFailureKeepsSaved(t *testing.T) {
+	a := &fakeSwitch{id: "a", disableErr: errors.New("boom")}
+	e, store, _ := newTestEngine(t, a)
+	activate(t, store, map[string]string{"a": "1"}, time.Time{})
+	ok, err := e.DisableOne(context.Background(), "a")
+	if err == nil || !strings.Contains(err.Error(), "a:") || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if st, _ := e.Status(); st.Saved["a"] != "1" || !st.Active {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestDisableOneLastSwitchKeepsModeActive(t *testing.T) {
+	a := &fakeSwitch{id: "a"}
+	e, store, c := newTestEngine(t, a)
+	exp := c.t.Add(time.Hour)
+	activate(t, store, map[string]string{"a": "1"}, exp)
+	if _, err := e.DisableOne(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := e.Status()
+	if !st.Active || len(st.Saved) != 0 || !st.ExpiresAt.Equal(exp) {
+		t.Fatalf("state = %+v", st)
+	}
+	if err := e.Disable(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := e.Status(); st.Active {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestDisableOneUnknownIDIsNoop(t *testing.T) {
+	a := &fakeSwitch{id: "a"}
+	e, store, _ := newTestEngine(t, a)
+	activate(t, store, map[string]string{"a": "1"}, time.Time{})
+	ok, err := e.DisableOne(context.Background(), "zzz")
+	if err != nil || !ok || a.disabled != 0 {
+		t.Fatalf("ok=%v err=%v disabled=%d", ok, err, a.disabled)
+	}
+	if st, _ := e.Status(); st.Saved["a"] != "1" {
+		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestDisableOneSavedWithoutSwitchReportsError(t *testing.T) {
+	e, store, _ := newTestEngine(t)
+	activate(t, store, map[string]string{"gone": "1"}, time.Time{})
+	_, err := e.DisableOne(context.Background(), "gone")
+	if err == nil || !strings.Contains(err.Error(), "gone") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDisableOneInactiveDoesNothing(t *testing.T) {
+	a := &fakeSwitch{id: "a"}
+	e, _, _ := newTestEngine(t, a)
+	ok, err := e.DisableOne(context.Background(), "a")
+	if err != nil || ok || a.disabled != 0 {
+		t.Fatalf("ok=%v err=%v disabled=%d", ok, err, a.disabled)
+	}
+}
+
+func TestSetSwitchesChangesNextEnable(t *testing.T) {
+	a := &fakeSwitch{id: "a", savedVal: "1"}
+	b := &fakeSwitch{id: "b", savedVal: "2"}
+	e, _, _ := newTestEngine(t, a)
+	e.SetSwitches([]Switch{b})
+	if err := e.Enable(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if a.enabled != 0 || b.enabled != 1 {
+		t.Fatalf("a=%d b=%d", a.enabled, b.enabled)
+	}
+}
