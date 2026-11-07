@@ -15,6 +15,7 @@ import (
 	"prezilla/internal/platform"
 	"prezilla/internal/system"
 	"prezilla/internal/tray"
+	"prezilla/internal/tray/icons"
 	"prezilla/internal/usererr"
 )
 
@@ -70,7 +71,16 @@ func run(ctx context.Context) int {
 		// long timeout; Quit still closes it through ctx. zenity 4 reads
 		// --icon=prezilla as a file path first, so run it from "/" where no
 		// such file can shadow the icon name.
-		aboutWindow := system.ZenityAbout{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}}
+		// Without zenity (or when it cannot start) the built-in X11 window
+		// takes over; the tray falls back to a notification if that fails.
+		zenity := system.ZenityAbout{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}}
+		aboutWindow := &system.FallbackAbout{
+			Primary:   zenity,
+			Secondary: system.X11About{Icon: icons.Idle},
+			Note: func(error) {
+				fmt.Fprintln(os.Stderr, "about: zenity not available; showing the built-in window instead")
+			},
+		}
 		return tray.Run(ctx, tray.Config{
 			Engine: d.Engine, Timeout: cfg.Timeout(), Spawn: spawnWatcher,
 			About:       about.New(version),

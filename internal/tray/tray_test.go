@@ -619,6 +619,20 @@ func TestAboutShowerNoZenityFallsBackAndWarnsOnce(t *testing.T) {
 	}
 }
 
+func TestAboutShowerNoDisplayFallsBackAndWarnsOnce(t *testing.T) {
+	w := &fakeWindow{err: fmt.Errorf("%w: dial unix: no such file", system.ErrNoDisplay)}
+	n := &system.FakeNotifier{}
+	s, log := newShower(w, n)
+	for i := 1; i <= 2; i++ {
+		if err := s.show(context.Background()); err != nil || len(n.Calls) != i {
+			t.Fatalf("click %d: err %v notify %v", i, err, n.Calls)
+		}
+	}
+	if log.String() != "about: no X display; showing a notification instead\n" {
+		t.Errorf("log %q", log.String())
+	}
+}
+
 func TestAboutShowerRealFailureFallsBack(t *testing.T) {
 	w := &fakeWindow{err: errors.New("about: zenity: exit status 2")}
 	n := &system.FakeNotifier{}
