@@ -85,3 +85,72 @@ func TestNilWindowListIsUnsupported(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+type fakePicker struct {
+	id   string
+	err  error
+	seen []system.Window
+}
+
+func (p *fakePicker) Pick(_ context.Context, ws []system.Window) (string, error) {
+	p.seen = ws
+	return p.id, p.err
+}
+
+func TestPickFocusesTheChosenWindow(t *testing.T) {
+	f := &system.FakeWindowFocus{Windows: []system.Window{{ID: "7", Title: "Slides"}, {ID: "9", Title: "Terminal"}}}
+	p := &fakePicker{id: "9"}
+	if err := (&windowList{src: f}).pick(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.seen) != 2 {
+		t.Errorf("picker saw %v", p.seen)
+	}
+	if got := f.FocusCalls("Focus"); len(got) != 1 || got[0] != "Focus 9" {
+		t.Errorf("focus calls %v", got)
+	}
+}
+
+func TestPickCancelledIsNotAnError(t *testing.T) {
+	f := &system.FakeWindowFocus{Windows: []system.Window{{ID: "7", Title: "Slides"}}}
+	if err := (&windowList{src: f}).pick(context.Background(), &fakePicker{err: system.ErrCancelled}); err != nil {
+		t.Errorf("err %v", err)
+	}
+	if got := f.FocusCalls("Focus"); len(got) != 0 {
+		t.Errorf("focus calls %v", got)
+	}
+}
+
+func TestPickReportsListAndPickerErrors(t *testing.T) {
+	boom := errors.New("boom")
+	if err := (&windowList{src: &system.FakeWindowFocus{ListErr: boom}}).pick(context.Background(), &fakePicker{}); !errors.Is(err, boom) {
+		t.Errorf("list: %v", err)
+	}
+	f := &system.FakeWindowFocus{Windows: []system.Window{{ID: "7"}}}
+	if err := (&windowList{src: f}).pick(context.Background(), &fakePicker{err: boom}); !errors.Is(err, boom) {
+		t.Errorf("picker: %v", err)
+	}
+}
+
+func TestChooseFirstReturnsTheChosenWindowOrNothing(t *testing.T) {
+	ws := []system.Window{{ID: "7", Title: "Slides"}}
+	cases := []struct {
+		name   string
+		f      *system.FakeWindowFocus
+		p      *fakePicker
+		want   string
+		picked bool
+	}{
+		{"chosen", &system.FakeWindowFocus{Windows: ws}, &fakePicker{id: "7"}, "7", true},
+		{"closed", &system.FakeWindowFocus{Windows: ws}, &fakePicker{err: system.ErrCancelled}, "", true},
+		{"picker fails", &system.FakeWindowFocus{Windows: ws}, &fakePicker{err: errors.New("boom")}, "", true},
+		{"no windows", &system.FakeWindowFocus{}, &fakePicker{id: "7"}, "", false},
+		{"list fails", &system.FakeWindowFocus{ListErr: errors.New("boom")}, &fakePicker{id: "7"}, "", false},
+	}
+	for _, c := range cases {
+		got := (&windowList{src: c.f}).chooseFirst(context.Background(), c.p)
+		if got != c.want || (c.p.seen != nil) != c.picked {
+			t.Errorf("%s: got %q, picker shown %v", c.name, got, c.p.seen != nil)
+		}
+	}
+}

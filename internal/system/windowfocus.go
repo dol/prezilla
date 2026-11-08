@@ -47,6 +47,16 @@ func DefaultWindowFocus(getenv func(string) string) WindowFocus {
 	return noWindowFocus{}
 }
 
+// DefaultWindowPicker returns the picker that goes with DefaultWindowFocus,
+// or nil when the session has none: the built-in picker needs X11 window
+// ids, so it is offered on X11 sessions only.
+func DefaultWindowPicker(getenv func(string) string) WindowPicker {
+	if getenv("WAYLAND_DISPLAY") == "" && getenv("DISPLAY") != "" {
+		return &X11Picker{}
+	}
+	return nil
+}
+
 type noWindowFocus struct{}
 
 func (noWindowFocus) List(context.Context) ([]Window, error) { return nil, ErrNoWindowFocus }

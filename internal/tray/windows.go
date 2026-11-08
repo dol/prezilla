@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"prezilla/internal/system"
+	"prezilla/internal/usererr"
 )
 
 const (
@@ -21,6 +22,9 @@ const (
 
 	// windowListTimeout bounds one refresh of the window list.
 	windowListTimeout = 3 * time.Second
+
+	pickWindowTitle   = "Choose window…"
+	pickWindowTooltip = "Shows the windows with a preview to pick one."
 
 	windowsTitle   = "Bring window to front"
 	windowsTooltip = "Brings a window to the front, also one that is minimized."
@@ -107,4 +111,39 @@ func (l *windowList) focus(ctx context.Context, slot int) error {
 		return fmt.Errorf("%w: slot %d", system.ErrNoWindow, slot)
 	}
 	return l.src.Focus(ctx, id)
+}
+
+// pick lets the user choose a window in picker and brings it to the front.
+// A picker closed without a choice is not an error.
+func (l *windowList) pick(ctx context.Context, picker system.WindowPicker) error {
+	ws, err := l.src.List(ctx)
+	if err != nil {
+		return err
+	}
+	id, err := picker.Pick(ctx, ws)
+	if errors.Is(err, system.ErrCancelled) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return l.src.Focus(ctx, id)
+}
+
+// chooseFirst lets the user pick the window to keep before presentation mode
+// turns on, while the windows still have pixels to preview. It returns ""
+// when nothing was chosen: the picker was closed, there was no window to
+// pick, or it failed (printed to stderr; presenting goes on without one).
+func (l *windowList) chooseFirst(ctx context.Context, picker system.WindowPicker) string {
+	ws, err := l.src.List(ctx)
+	if err == nil && len(ws) > 0 {
+		var id string
+		if id, err = picker.Pick(ctx, ws); err == nil {
+			return id
+		}
+	}
+	if err != nil && !errors.Is(err, system.ErrCancelled) && ctx.Err() == nil {
+		fmt.Fprintln(os.Stderr, usererr.Explain(err))
+	}
+	return ""
 }

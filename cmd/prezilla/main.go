@@ -86,6 +86,7 @@ func run(ctx context.Context) int {
 			),
 			StartDir: homeDir(),
 			Windows:  system.DefaultWindowFocus(os.Getenv),
+			Picker:   system.DefaultWindowPicker(os.Getenv),
 			SwitchFor: func(id, image string) (core.Switch, error) {
 				return platform.Switch(desktop, backends, id, image)
 			},

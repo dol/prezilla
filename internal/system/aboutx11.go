@@ -404,15 +404,23 @@ func (a X11About) Show(ctx context.Context, info about.Info) (err error) {
 	}
 }
 
-// key looks the pressed key's keysym up (first column of the keyboard
-// mapping, which covers every key the window uses).
-func (w *xwin) key(e xproto.KeyPressEvent) aboutKey {
+// keysym looks the pressed key's keysym up (first column of the keyboard
+// mapping, which covers every key the windows use); ok is false when the
+// server cannot tell.
+func (w *xwin) keysym(e xproto.KeyPressEvent) (sym uint32, shift, ok bool) {
 	m, err := xproto.GetKeyboardMapping(w.xu.Conn(), e.Detail, 1).Reply()
 	if err != nil || m == nil || m.KeysymsPerKeycode == 0 || len(m.Keysyms) == 0 {
+		return 0, false, false
+	}
+	return uint32(m.Keysyms[0]), e.State&xproto.ModMaskShift != 0, true
+}
+
+func (w *xwin) key(e xproto.KeyPressEvent) aboutKey {
+	sym, shift, ok := w.keysym(e)
+	if !ok {
 		return keyOther
 	}
-	sym := uint32(m.Keysyms[0])
-	return keyFor(sym, e.State&xproto.ModMaskShift != 0)
+	return keyFor(sym, shift)
 }
 
 // solid is a 1x1 image of c, for packing a single pixel value.

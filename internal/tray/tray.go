@@ -272,6 +272,9 @@ type Config struct {
 	// submenu and focuses the one picked; nil, or a session that cannot do
 	// it, leaves the submenu out.
 	Windows system.WindowFocus
+	// Picker shows the windows with previews for "Choose window…"; nil
+	// leaves that item out.
+	Picker system.WindowPicker
 	// SwitchFor builds one switch; image is the wallpaper path.
 	SwitchFor func(id, image string) (core.Switch, error)
 	// SwitchesFor builds the configured switches; the tray reloads
@@ -518,6 +521,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// each at a time. The chooser has its own, so ticks stay usable while
 	// its dialog is open.
 	var tg, xt, kt toggler
+	tg.timeout = chooseTimeout // the window picker, when turning on, waits for the user
 	ct := toggler{timeout: chooseTimeout}
 	shower := &aboutShower{window: cfg.AboutWindow, notifier: cfg.Notifier, info: cfg.About}
 	// redraw asks the menu loop to refresh; coalesced, never blocks.
@@ -602,6 +606,11 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 	for i := range windowSlots {
 		windowSlots[i] = windowsItem.AddSubMenuItem("", "")
 		windowSlots[i].Hide()
+	}
+	var pickItem *systray.MenuItem
+	if cfg.Picker != nil {
+		pickItem = systray.AddMenuItem(pickWindowTitle, pickWindowTooltip)
+		pickItem.Hide()
 	}
 	windows := &windowList{src: cfg.Windows}
 	var windowsShown bool
@@ -718,6 +727,9 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 		if show := len(titles) > 0; show != windowsShown {
 			windowsShown = show
 			setVisible(windowsItem, show)
+			if pickItem != nil {
+				setVisible(pickItem, show)
+			}
 		}
 		for i, slot := range windowSlots {
 			switch {
@@ -765,10 +777,25 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 	// toggle is the one handler for the checkbox and a click on the icon.
 	// A click while a toggle runs is dropped.
 	toggle := func() {
-		tg.start(ctx, func(tctx context.Context) {
+		tg.start(ctx, func(context.Context) {
+			// Turning the mode on first asks which window to keep: the
+			// switches may minimize everything, and a minimized window has
+			// no preview. Closing the picker keeps none. The picker waits
+			// for the user, so the engine gets its own bound afterwards.
+			var chosen string
 			if st, err := e.Status(); err == nil && !st.Active {
 				reloadSwitches(e, cfg.ConfigPath, cfg.SwitchesFor)
+				if cfg.Picker != nil && windows.supported() {
+					cctx, stop := context.WithCancel(ctx)
+					chosen = windows.chooseFirst(cctx, cfg.Picker)
+					stop()
+					if ctx.Err() != nil {
+						return // Quit while choosing: leave the mode as it is
+					}
+				}
 			}
+			tctx, tcancel := context.WithTimeout(context.WithoutCancel(ctx), core.OperationTimeout)
+			defer tcancel()
 			_, err := e.Toggle(tctx, timeout)
 			if serr := spawnIfDeadline(e.Status, spawn); serr != nil {
 				err = errors.Join(err, serr)
@@ -778,6 +805,10 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 			mu.Unlock()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, usererr.Explain(err))
+			} else if chosen != "" {
+				// The minimize switch has hidden every window; activating the
+				// chosen one brings back just that one.
+				focusErr.run(tctx, func(c context.Context) error { return windows.src.Focus(c, chosen) }, func() {})
 			}
 			refresh()
 		})
@@ -827,6 +858,29 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 		})
 	}
 
+	// pick opens the window picker on its own toggler, whose bound allows
+	// for the open window; Quit closes it, and a click while it is open is
+	// ignored.
+	pt := toggler{timeout: chooseTimeout}
+	var pickClicks <-chan struct{}
+	if pickItem != nil {
+		pickClicks = pickItem.ClickedCh
+	}
+	pick := func() {
+		pt.start(ctx, func(pctx context.Context) {
+			cctx, stop := context.WithCancel(pctx)
+			defer stop()
+			defer context.AfterFunc(ctx, stop)()
+			focusErr.run(cctx, func(c context.Context) error {
+				err := windows.pick(c, cfg.Picker)
+				if err != nil && ctx.Err() != nil {
+					return nil // closed by Quit
+				}
+				return err
+			}, refresh)
+		})
+	}
+
 	go func() {
 		t := time.NewTicker(pollEvery)
 		defer t.Stop()
@@ -857,6 +911,8 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 				}
 			case slot := <-focusReq:
 				focus(slot)
+			case <-pickClicks:
+				pick()
 			case <-chooseItem.ClickedCh:
 				choose()
 			case <-aboutItem.ClickedCh:
