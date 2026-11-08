@@ -264,6 +264,12 @@ var rules = []rule{
 		}
 		return "", false
 	}},
+	{"window gone", func(err error, _ string) (string, bool) {
+		if errors.Is(err, system.ErrNoWindow) {
+			return "That window is gone. Pick another one from the list.", true
+		}
+		return "", false
+	}},
 	{"no switch ticked", func(err error, _ string) (string, bool) {
 		if errors.Is(err, core.ErrNoSwitches) {
 			return `No switch is ticked, so presentation mode would change nothing. Tick at least one switch in the tray menu, or add one to "switches" in config.json.`, true

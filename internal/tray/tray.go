@@ -268,6 +268,10 @@ type Config struct {
 	Chooser system.FileChooser
 	// StartDir is where the chooser opens (the user's home directory).
 	StartDir string
+	// Windows lists the open windows for the "Bring window to front"
+	// submenu and focuses the one picked; nil, or a session that cannot do
+	// it, leaves the submenu out.
+	Windows system.WindowFocus
 	// SwitchFor builds one switch; image is the wallpaper path.
 	SwitchFor func(id, image string) (core.Switch, error)
 	// SwitchesFor builds the configured switches; the tray reloads
@@ -592,6 +596,16 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 	timerItem.Hide()
 	resetItem := systray.AddMenuItem(m.Reset.Title, m.Reset.Tooltip)
 	resetItem.Hide()
+	windowsItem := systray.AddMenuItem(windowsTitle, windowsTooltip)
+	windowsItem.Hide()
+	windowSlots := make([]*systray.MenuItem, maxWindowSlots)
+	for i := range windowSlots {
+		windowSlots[i] = windowsItem.AddSubMenuItem("", "")
+		windowSlots[i].Hide()
+	}
+	windows := &windowList{src: cfg.Windows}
+	var windowsShown bool
+	windowTitles := make([]string, maxWindowSlots) // what each slot shows, guarded by mu
 	systray.AddSeparator()
 	tickMenu := make([]*systray.MenuItem, len(tickItems))
 	for i, it := range tickModel(nil, nil) {
@@ -606,7 +620,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 	set := newSettings(ctx, cfg)
 	var mu sync.Mutex // guards lastErr, lastExpiryErr and the visibility flags
 	var lastErr error
-	var actions, extendErr, tickErr, chooseErr actionState
+	var actions, extendErr, tickErr, chooseErr, focusErr actionState
 	var lastExpiryErr, lastStatusErr, lastConfigErr string
 	ticksEnabled := true // guarded by mu
 	var timerShown, resetShown, promptShown bool
@@ -618,6 +632,12 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 		_, expErr := e.DisableIfExpired(opCtx)
 		opCancel()
 		st, err := e.Status()
+		var titles []string
+		if err == nil && st.Active {
+			wctx, wcancel := context.WithTimeout(ctx, windowListTimeout)
+			titles = windows.refresh(wctx)
+			wcancel()
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		note := noteExpiry(lastExpiryErr, expErr)
@@ -641,6 +661,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 			clearActionErrors(&actions, &extendErr, coord)
 			tickErr.clear()
 			chooseErr.clear()
+			focusErr.clear()
 		}
 		wasActive, wasDeadline = st.Active, hasDeadline
 		coord.check(st, now)
@@ -664,6 +685,7 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 		}
 		errText := joinErrText(joinErrText(toggleText, actions.text()), joinErrText(extendErr.text(), coord.errText()))
 		errText = joinErrText(errText, settingsErrText(tickErr.text(), chooseErr.text(), cfgNote.short))
+		errText = joinErrText(errText, focusErr.text())
 		tip := tooltip(st.Active, remaining, errText, expText, prompting)
 		var left time.Duration
 		if timer != "" {
@@ -692,6 +714,25 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 			promptShown = m.Keep.Visible
 			setVisible(keepItem, promptShown)
 			setVisible(stopItem, m.Stop.Visible)
+		}
+		if show := len(titles) > 0; show != windowsShown {
+			windowsShown = show
+			setVisible(windowsItem, show)
+		}
+		for i, slot := range windowSlots {
+			switch {
+			case i >= len(titles):
+				if windowTitles[i] != "" {
+					windowTitles[i] = ""
+					slot.Hide()
+				}
+			case windowTitles[i] != titles[i]:
+				if windowTitles[i] == "" {
+					slot.Show()
+				}
+				windowTitles[i] = titles[i]
+				slot.SetTitle(titles[i])
+			}
 		}
 		// The engine state is the only source of the checkmark: set it on
 		// every refresh, so a failed toggle, a host that ticked the box
@@ -771,6 +812,21 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 		})
 	}
 
+	// focusReq carries the clicked window slot to the menu loop; one
+	// forwarding goroutine per slot, never blocking the D-Bus goroutine.
+	focusReq := make(chan int, maxWindowSlots)
+	for i, slot := range windowSlots {
+		go forwardSlotClicks(ctx, slot.ClickedCh, i, focusReq)
+	}
+	// focus brings a window to the front on its own toggler, so a slow
+	// window manager never holds the menu loop.
+	var wt toggler
+	focus := func(slot int) {
+		wt.start(ctx, func(wctx context.Context) {
+			focusErr.run(wctx, func(c context.Context) error { return windows.focus(c, slot) }, refresh)
+		})
+	}
+
 	go func() {
 		t := time.NewTicker(pollEvery)
 		defer t.Stop()
@@ -799,6 +855,8 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 				} else {
 					setTick(id)
 				}
+			case slot := <-focusReq:
+				focus(slot)
 			case <-chooseItem.ClickedCh:
 				choose()
 			case <-aboutItem.ClickedCh:
@@ -808,6 +866,22 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 			}
 		}
 	}()
+}
+
+// forwardSlotClicks sends slot to req for every click on clicked until ctx
+// ends; a click while req is full is dropped.
+func forwardSlotClicks(ctx context.Context, clicked <-chan struct{}, slot int, req chan<- int) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-clicked:
+			select {
+			case req <- slot:
+			default:
+			}
+		}
+	}
 }
 
 // settingsErrText joins the tick, chooser and config error texts for the

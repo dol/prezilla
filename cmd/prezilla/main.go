@@ -85,6 +85,7 @@ func run(ctx context.Context) int {
 				system.ZenityChooser{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}},
 			),
 			StartDir: homeDir(),
+			Windows:  system.DefaultWindowFocus(os.Getenv),
 			SwitchFor: func(id, image string) (core.Switch, error) {
 				return platform.Switch(desktop, backends, id, image)
 			},

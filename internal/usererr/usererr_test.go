@@ -116,6 +116,7 @@ func cases() []struct {
 		{"chooser could not start", fmt.Errorf("file chooser: %w: %w", errors.New("zenity could not start its window"), errors.New("exit status 1")),
 			`Couldn't open the file chooser: zenity could not start its window. Check that your desktop session is running, or set "wallpaper" in config.json.`},
 		// The shapes system.PortalChooser returns for a portal that failed.
+		{"window gone", fmt.Errorf("window list: %w: 42", system.ErrNoWindow), "That window is gone. Pick another one from the list."},
 		{"portal ended the dialog", fmt.Errorf("file chooser: portal: %w: the dialog ended with response 2", system.ErrPortalFailed), sPortal},
 		{"portal error reply", fmt.Errorf("file chooser: portal: %w: open: %w", system.ErrPortalFailed,
 			dbus.Error{Name: "org.freedesktop.portal.Error.Failed", Body: []any{"boom"}}), sPortal},
