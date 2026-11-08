@@ -52,7 +52,7 @@ func run(ctx context.Context) int {
 		fmt.Fprintln(os.Stderr, usererr.Explain(err))
 		return 1
 	}
-	backends := system.Backends{Runner: system.ExecRunner{}, Audio: system.PulseAudio{}, Windows: system.X11Windows{}, Xfconf: system.DBusXfconf{}}
+	backends := system.Backends{Runner: system.ExecRunner{}, Audio: system.PulseAudio{}, Windows: system.X11Windows{}, Xfconf: system.DBusXfconf{}, Wallpaper: system.DefaultWallpaper()}
 	switches, err := platform.Switches(desktop, backends, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, usererr.Explain(err))

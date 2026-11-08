@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Application and tray icons (hicolor PNG sizes and scalable SVG).
 - Packaging: `make install`, and `.deb`, `.rpm` and `.pkg.tar.zst` packages via nfpm.
 - GitHub Actions CI and release workflows.
+- Generic wallpaper switch for desktops other than XFCE: GNOME (also its dark picture), Unity, Pantheon, Cinnamon, MATE, Deepin, KDE Plasma, LXDE, macOS and Windows read the current wallpaper, set the configured image and restore the original on `off`. It uses `gsettings`, `dconf`, `pcmanfm` or `osascript` where the desktop has no other interface; KDE is reached over D-Bus. Prezilla still starts on XFCE only, so it is not reachable from the command line yet.
 
 ### Changed
 - Tray: "Choose wallpaper…" uses the desktop's file chooser portal over D-Bus (for example `xdg-desktop-portal-gtk`), with `zenity` as the fallback. Without either, the notification explains how to set `wallpaper` in `config.json`. The `.deb` and `.rpm` packages also recommend `xdg-desktop-portal-gtk`.

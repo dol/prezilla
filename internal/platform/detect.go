@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"prezilla/internal/core"
+	"prezilla/internal/platform/generic"
 	"prezilla/internal/platform/xfce"
 	"prezilla/internal/system"
 )
@@ -21,11 +22,14 @@ func Detect(getenv func(string) string) (string, error) {
 	return "", fmt.Errorf("unsupported desktop %q", v)
 }
 
-// Switches builds the switches for desktop as configured in cfg.
+// Switches builds the switches for desktop as configured in cfg. The desktop
+// "generic" has only the switches the cross-platform libraries provide.
 func Switches(desktop string, b system.Backends, cfg core.Config) ([]core.Switch, error) {
 	switch desktop {
 	case "xfce":
 		return xfce.Switches(b, cfg), nil
+	case "generic":
+		return generic.Switches(b, cfg), nil
 	}
 	return nil, fmt.Errorf("unsupported desktop %q", desktop)
 }
@@ -36,6 +40,8 @@ func AllSwitches(desktop string, b system.Backends, cfg core.Config) ([]core.Swi
 	switch desktop {
 	case "xfce":
 		return xfce.All(b, cfg), nil
+	case "generic":
+		return generic.All(b, cfg), nil
 	}
 	return nil, fmt.Errorf("unsupported desktop %q", desktop)
 }
@@ -49,6 +55,11 @@ func Switch(desktop string, b system.Backends, id, image string) (core.Switch, e
 			return sw, nil
 		}
 		return nil, fmt.Errorf("unknown switch %q", id)
+	case "generic":
+		if sw, ok := generic.New(b, id, image); ok {
+			return sw, nil
+		}
+		return nil, fmt.Errorf("switch %q is not available on this desktop", id)
 	}
 	return nil, fmt.Errorf("unsupported desktop %q", desktop)
 }

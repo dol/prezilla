@@ -25,6 +25,8 @@ type Backends struct {
 	Audio   Audio
 	Windows Windows
 	Xfconf  Xfconf
+	// Wallpaper serves desktops without their own wallpaper switch.
+	Wallpaper Wallpaper
 }
 
 // FakeAudio is an in-memory Audio for tests. Set the exported fields before

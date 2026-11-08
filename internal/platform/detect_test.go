@@ -85,3 +85,21 @@ func TestSwitchBuildsOneAndRejectsUnsupportedDesktop(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+func TestGenericDesktopOffersOnlyWallpaper(t *testing.T) {
+	b := system.Backends{Wallpaper: &system.FakeWallpaper{}}
+	cfg := core.Config{Switches: []string{core.IDMute, core.IDWallpaper}}
+	sws, err := Switches("generic", b, cfg)
+	if err != nil || len(sws) != 1 || sws[0].ID() != core.IDWallpaper {
+		t.Fatalf("got %v, %v", sws, err)
+	}
+	if all, err := AllSwitches("generic", b, cfg); err != nil || len(all) != 1 {
+		t.Errorf("All: %v, %v", all, err)
+	}
+	if sw, err := Switch("generic", b, core.IDWallpaper, ""); err != nil || sw == nil {
+		t.Errorf("Switch: %v, %v", sw, err)
+	}
+	if _, err := Switch("generic", b, core.IDMute, ""); err == nil {
+		t.Error("expected error for a switch without generic implementation")
+	}
+}
