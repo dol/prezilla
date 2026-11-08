@@ -260,7 +260,10 @@ func TestPortalResult(t *testing.T) {
 	if _, err := portalResult([]any{uint32(1), map[string]dbus.Variant{}}); !errors.Is(err, ErrCancelled) {
 		t.Errorf("cancel: %v", err)
 	}
-	if _, err := portalResult([]any{uint32(2), map[string]dbus.Variant{}}); !errors.Is(err, ErrPortalFailed) || errors.Is(err, ErrCancelled) {
+	if _, err := portalResult([]any{uint32(2), map[string]dbus.Variant{}}); !errors.Is(err, ErrCancelled) {
+		t.Errorf("ended: %v", err)
+	}
+	if _, err := portalResult([]any{uint32(3), map[string]dbus.Variant{}}); !errors.Is(err, ErrPortalFailed) || errors.Is(err, ErrCancelled) {
 		t.Errorf("other: %v", err)
 	}
 	for _, body := range [][]any{nil, {uint32(0)}, {"x", map[string]dbus.Variant{}}, chosen()} {
@@ -343,13 +346,13 @@ func TestPortalChooserCancelled(t *testing.T) {
 	}
 }
 
-func TestPortalChooserEndedOtherwise(t *testing.T) {
+func TestPortalChooserEndedOtherwiseIsCancelled(t *testing.T) {
 	addr := privateBus(t)
 	newFakePortal(t, addr, nil, func(f *fakePortal) {
 		f.reply = []any{uint32(2), map[string]dbus.Variant{}}
 	})
 	_, err := PortalChooser{}.ChooseImage(testCtx(t), "/")
-	if !errors.Is(err, ErrPortalFailed) || errors.Is(err, ErrCancelled) || errors.Is(err, ErrNoPortal) {
+	if !errors.Is(err, ErrCancelled) {
 		t.Fatalf("err = %v", err)
 	}
 }

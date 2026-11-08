@@ -43,6 +43,10 @@ const (
 const (
 	portalChosen    = 0
 	portalCancelled = 1
+	// portalEnded is "ended in some other way". The GTK backend answers it
+	// when the dialog is closed with Esc or the window's close button, so it
+	// counts as cancelled.
+	portalEnded = 2
 )
 
 // PortalChooser asks for an image with the desktop's file chooser portal
@@ -182,7 +186,7 @@ func portalResult(body []any) (string, error) {
 	}
 	switch code {
 	case portalChosen:
-	case portalCancelled:
+	case portalCancelled, portalEnded:
 		return "", ErrCancelled
 	default:
 		return "", fmt.Errorf("file chooser: portal: %w: the dialog ended with response %d", ErrPortalFailed, code)
