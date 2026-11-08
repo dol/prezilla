@@ -80,10 +80,10 @@ func run(ctx context.Context) int {
 			// gets a long timeout; Quit still closes either through ctx.
 			// zenity 4 reads --filename as a file path first, so run it
 			// from "/".
-			Chooser: &system.FallbackChooser{
-				Primary:   system.PortalChooser{},
-				Secondary: system.ZenityChooser{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}},
-			},
+			Chooser: system.NewChooserList(
+				system.PortalChooser{},
+				system.ZenityChooser{Runner: system.ExecRunner{Timeout: 30 * time.Minute, Dir: "/"}},
+			),
 			StartDir: homeDir(),
 			SwitchFor: func(id, image string) (core.Switch, error) {
 				return platform.Switch(desktop, backends, id, image)

@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 - Tray: "Choose wallpaper…" uses the desktop's file chooser portal over D-Bus (for example `xdg-desktop-portal-gtk`), with `zenity` as the fallback. Without either, the notification explains how to set `wallpaper` in `config.json`. The `.deb` and `.rpm` packages also recommend `xdg-desktop-portal-gtk`.
+- The wallpaper file choosers are tried in order of preference and each says whether it is supported on this system; the first supported one is used, and one that turns out to be missing hands over to the next.
 - About no longer uses `zenity`; it is only used as the fallback wallpaper file chooser.
 - `wallpaper` in `config.json` adds the `wallpaper` switch only when the file has no `switches` key; a `switches` list is used exactly as written. If your file lists `switches` and sets `wallpaper`, add "wallpaper" to `switches` to keep it.
 - Icons, notifications and wallpaper (and the new presentation switch) talk to the XFCE settings daemon (`xfconfd`) directly over the D-Bus session bus instead of running `xfconf-query`, which is no longer needed. A settings service that cannot be reached is reported as a plain sentence with a next step.

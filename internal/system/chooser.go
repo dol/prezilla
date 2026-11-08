@@ -117,12 +117,20 @@ func (z ZenityChooser) ChooseImage(ctx context.Context, startDir string) (string
 	return strings.TrimSuffix(out, "\n"), nil
 }
 
-// FakeChooser is a FileChooser for tests; it records each startDir.
+// Supported implements Chooser: zenity needs a runner; whether the binary
+// exists only shows when it runs, as ErrNoZenity.
+func (z ZenityChooser) Supported(context.Context) bool { return z.Runner != nil }
+
+// FakeChooser is a Chooser for tests; it records each startDir.
 type FakeChooser struct {
-	Path  string
-	Err   error
-	Calls []string
+	Path        string
+	Err         error
+	Unsupported bool
+	Calls       []string
 }
+
+// Supported implements Chooser.
+func (f *FakeChooser) Supported(context.Context) bool { return !f.Unsupported }
 
 // ChooseImage implements FileChooser.
 func (f *FakeChooser) ChooseImage(_ context.Context, startDir string) (string, error) {
@@ -135,45 +143,62 @@ func (f *FakeChooser) ChooseImage(_ context.Context, startDir string) (string, e
 // config.json instead.
 var ErrNoChooser = errors.New("no file chooser available")
 
+// Chooser is a FileChooser that can tell whether it is usable here, so a
+// ChooserList can skip it for the next one.
+type Chooser interface {
+	FileChooser
+	// Supported reports whether the chooser can be tried now. It is a
+	// cheap probe; a chooser may still report itself unavailable from
+	// ChooseImage.
+	Supported(ctx context.Context) bool
+}
+
 // chooserUnavailable reports whether err means a chooser is not there, as
 // opposed to a dialog that ran or failed.
 func chooserUnavailable(err error) bool {
 	return errors.Is(err, ErrNoPortal) || errors.Is(err, ErrNoZenity) || errors.Is(err, ErrNoChooser)
 }
 
-// FallbackChooser tries Primary and, when it is unavailable, Secondary. A
-// chosen file, ErrCancelled, ctx's end and real failures of Primary are
-// final. When neither is available the error wraps ErrNoChooser.
-type FallbackChooser struct {
-	Primary, Secondary FileChooser
-	// ShouldFallback decides whether Primary's error moves on to Secondary;
-	// nil means errors.Is(err, ErrNoPortal).
-	ShouldFallback func(error) bool
+// ChooserList is an ordered list of registered choosers. ChooseImage uses
+// the first supported one; one that turns out unavailable when called hands
+// over to the next. A chosen file, ErrCancelled, ctx's end and real failures
+// are final. When none can be used the error wraps ErrNoChooser.
+type ChooserList struct {
+	choosers []Chooser
 }
 
-func (f *FallbackChooser) shouldFallback(err error) bool {
-	if f.ShouldFallback != nil {
-		return f.ShouldFallback(err)
+// NewChooserList returns a list holding choosers in order of preference.
+func NewChooserList(choosers ...Chooser) *ChooserList {
+	return &ChooserList{choosers: choosers}
+}
+
+// Register appends c, the least preferred so far; nil is ignored.
+func (l *ChooserList) Register(c Chooser) {
+	if c != nil {
+		l.choosers = append(l.choosers, c)
 	}
-	return errors.Is(err, ErrNoPortal)
 }
 
 // ChooseImage implements FileChooser.
-func (f *FallbackChooser) ChooseImage(ctx context.Context, startDir string) (string, error) {
-	perr := fmt.Errorf("%w: no primary file chooser", ErrNoPortal)
-	if f.Primary != nil {
-		path, err := f.Primary.ChooseImage(ctx, startDir)
-		if err == nil || errors.Is(err, ErrCancelled) || ctx.Err() != nil || !f.shouldFallback(err) {
-			return path, err
+func (l *ChooserList) ChooseImage(ctx context.Context, startDir string) (string, error) {
+	skipped := []error{ErrNoChooser}
+	for _, c := range l.choosers {
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
-		perr = err
+		if !c.Supported(ctx) {
+			skipped = append(skipped, fmt.Errorf("%T: not supported", c))
+			continue
+		}
+		path, err := c.ChooseImage(ctx, startDir)
+		if err != nil && chooserUnavailable(err) && ctx.Err() == nil {
+			skipped = append(skipped, err)
+			continue
+		}
+		return path, err
 	}
-	if f.Secondary == nil {
-		return "", fmt.Errorf("%w: %w", ErrNoChooser, perr)
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	path, err := f.Secondary.ChooseImage(ctx, startDir)
-	if err != nil && chooserUnavailable(err) && ctx.Err() == nil {
-		return "", fmt.Errorf("%w: %w; %w", ErrNoChooser, perr, err)
-	}
-	return path, err
+	return "", errors.Join(skipped...)
 }

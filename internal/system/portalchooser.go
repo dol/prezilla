@@ -207,6 +207,31 @@ func closePortalRequest(conn *dbus.Conn, request dbus.ObjectPath) {
 	conn.Object(portalName, request).CallWithContext(ctx, portalRequest+".Close", 0)
 }
 
+// Supported implements Chooser: the session bus is reachable and the portal
+// service is running or can be started by D-Bus activation.
+func (p PortalChooser) Supported(ctx context.Context) bool {
+	conn, err := connectSession(ctx, p.timeout(), "file chooser: portal")
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	bus := conn.BusObject()
+	var has bool
+	if bus.CallWithContext(ctx, "org.freedesktop.DBus.NameHasOwner", 0, portalName).Store(&has) == nil && has {
+		return true
+	}
+	var names []string
+	if bus.CallWithContext(ctx, "org.freedesktop.DBus.ListActivatableNames", 0).Store(&names) != nil {
+		return false
+	}
+	for _, n := range names {
+		if n == portalName {
+			return true
+		}
+	}
+	return false
+}
+
 // ChooseImage implements FileChooser. It returns the chosen path, ErrCancelled
 // when the dialog was dismissed, an error wrapping ErrNoPortal when no portal
 // is reachable, ctx's error when ctx ended (the dialog is then closed), or an
