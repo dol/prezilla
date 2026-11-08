@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tray: turning presentation mode on from the tray first opens a window picker (X11): a card per open window with a live thumbnail and its title. The window you pick stays in front while the `minimize` switch hides the others; closing the picker or pressing Esc keeps none. "Choose window…" in the menu opens the same picker while presenting; a minimized window then shows the last thumbnail captured of it, or "No preview" when there was none. Thumbnails use the Composite extension, so windows hidden behind others read correctly.
 
 ### Changed
+- Tray: a greyed "Options" heading sits above the switch tick boxes, so they read as options even where the panel theme hides the separator line (dark themes).
 - Tray: "Choose wallpaper…" uses the desktop's file chooser portal over D-Bus (for example `xdg-desktop-portal-gtk`), with `zenity` as the fallback. Without either, the notification explains how to set `wallpaper` in `config.json`. The `.deb` and `.rpm` packages also recommend `xdg-desktop-portal-gtk`.
 - The wallpaper file choosers are tried in order of preference and each says whether it is supported on this system; the first supported one is used, and one that turns out to be missing hands over to the next.
 - About no longer uses `zenity`; it is only used as the fallback wallpaper file chooser.

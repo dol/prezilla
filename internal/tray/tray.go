@@ -76,8 +76,10 @@ func tooltip(active bool, remaining, toggleErr, expiryErr string, prompting bool
 // The checkbox's title and hover text never change; its checkmark shows
 // the state.
 const (
-	modeTitle   = "Presentation mode"
-	modeTooltip = "Turn presentation mode on or off"
+	optionsTitle   = "Options"
+	optionsTooltip = "What presentation mode changes."
+	modeTitle      = "Presentation mode"
+	modeTooltip    = "Turn presentation mode on or off"
 )
 
 // itemState is what one menu item should show.
@@ -616,6 +618,10 @@ func onReady(ctx context.Context, cancel context.CancelFunc, cfg Config, tg, xt,
 	var windowsShown bool
 	windowTitles := make([]string, maxWindowSlots) // what each slot shows, guarded by mu
 	systray.AddSeparator()
+	// The separator's color is the panel theme's and nearly vanishes in
+	// dark themes, so a greyed heading marks the tick boxes as options.
+	optionsItem := systray.AddMenuItem(optionsTitle, optionsTooltip)
+	optionsItem.Disable()
 	tickMenu := make([]*systray.MenuItem, len(tickItems))
 	for i, it := range tickModel(nil, nil) {
 		tickMenu[i] = systray.AddMenuItemCheckbox(it.Title, it.Tooltip, false)
