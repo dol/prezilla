@@ -1,4 +1,4 @@
-# Prezilla
+# Prezilla 🦖
 
 Prezilla puts your desktop into presentation mode with one click or one command: it hides desktop icons, turns off notifications and sound, clears your windows and keeps the screen awake. When you finish, or after 30 minutes, everything returns to how it was.
 
